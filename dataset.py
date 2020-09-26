@@ -3,8 +3,9 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import logging
+from transformers import AutoTokenizer
+from bclm import treebank as tb
 import fasttext_emb as ft
-
 from torch.utils.data import TensorDataset
 
 
@@ -118,8 +119,8 @@ def _to_seg_sample(input_df, output_df, xtokenizer, max_input_len, max_output_le
 
     output_xform_ids = xtokenizer.convert_tokens_to_ids(output_df.xform)
     output_xform_ids = [xtokenizer.cls_token_id] + output_xform_ids + [xtokenizer.sep_token_id]
-    output_xform_mask = [1] * len(output_xform_ids)
-    fill_output_xform_mask_len = max_output_len - len(output_xform_ids)
+    output_xform_mask = [0] + [1] * (len(output_xform_ids) - 2) + [0]
+    fill_output_xform_mask_len = max_output_len + 2 - len(output_xform_ids)
     output_xform_ids += [xtokenizer.pad_token_id] * fill_output_xform_mask_len
     output_xform_mask += [0] * fill_output_xform_mask_len
     return input_xtoken_ids, input_xtoken_mask, output_xform_ids, output_xform_mask
@@ -152,3 +153,53 @@ def load_seg_tensor_dataset(data_root_path, partition, xtokenizer):
         tensor_samples = torch.load(seg_tensor_data_file_path)
         tensor_data[part] = tensor_samples
     return tensor_data
+
+
+def load_tensor_data(roberta_tokenizer, bert_tokenizer):
+    partition = {'train': None, 'dev': None, 'test': None}
+    load_seg_tensor_dataset('data', partition, bert_tokenizer)
+    load_seg_tensor_dataset('data', partition, roberta_tokenizer)
+
+
+def save_tensor_data(roberta_tokenizer, bert_tokenizer):
+    partition = {'train': None, 'dev': None, 'test': None}
+    roberta_input_data = load_processed_input_data('data/processed/hebtb', partition, roberta_tokenizer)
+    bert_input_data = load_processed_input_data('data/processed/hebtb', partition, bert_tokenizer)
+    roberta_seg_output_data = load_processed_output_seg_data('data/processed/hebtb', partition, roberta_tokenizer)
+    bert_seg_output_data = load_processed_output_seg_data('data/processed/hebtb', partition, bert_tokenizer)
+    seg_dataset = to_seg_dataset(partition, bert_input_data, bert_seg_output_data, bert_tokenizer)
+    seg_tensor_dataset = to_seg_tensor_dataset(partition, seg_dataset, bert_tokenizer)
+    save_seg_tensor_dataset('data', partition, seg_tensor_dataset, bert_tokenizer)
+    seg_dataset = to_seg_dataset(partition, roberta_input_data, roberta_seg_output_data, roberta_tokenizer)
+    seg_tensor_dataset = to_seg_tensor_dataset(partition, seg_dataset, roberta_tokenizer)
+    save_seg_tensor_dataset('data', partition, seg_tensor_dataset, roberta_tokenizer)
+
+
+def save_processed_data(roberta_tokenizer, bert_tokenizer):
+    partition = tb.spmrl('data/raw')
+    roberta_input_data = xtokenize_token_data(partition, roberta_tokenizer)
+    save_processed_input_data('data/processed/hebtb', roberta_input_data, roberta_tokenizer)
+    bert_input_data = xtokenize_token_data(partition, bert_tokenizer)
+    save_processed_input_data('data/processed/hebtb', bert_input_data, bert_tokenizer)
+    roberta_seg_output_data = xtokenize_form_data(partition, roberta_tokenizer)
+    save_processed_output_seg_data('data/processed/hebtb', roberta_seg_output_data, roberta_tokenizer)
+    bert_seg_output_data = xtokenize_form_data(partition, bert_tokenizer)
+    save_processed_output_seg_data('data/processed/hebtb', bert_seg_output_data, bert_tokenizer)
+
+
+if __name__ == '__main__':
+    # Setup logging
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO
+    )
+    roberta_tokenizer = AutoTokenizer.from_pretrained("./experiments/transformers/roberta-bpe-byte-v1")
+    logging.info(f'{type(roberta_tokenizer).__name__} loaded')
+    bert_tokenizer = AutoTokenizer.from_pretrained("./experiments/transformers/bert-wordpiece-v1")
+    logging.info(f'{type(bert_tokenizer).__name__} loaded')
+    # save_processed_data(roberta_tokenizer, bert_tokenizer)
+    save_tensor_data(roberta_tokenizer, bert_tokenizer)
+    load_tensor_data(roberta_tokenizer, bert_tokenizer)
+    # save_xemb(bert_tokenizer)
