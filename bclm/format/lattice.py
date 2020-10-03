@@ -1,7 +1,7 @@
 from copy import copy
 import logging
 import pandas as pd
-from .utils import split_sentences
+from .utils import split_sentences, lattice_fields
 
 # SPMRL Lattice format is described in "Input Formats" section of the SPMRL14 shared task description:
 # http://dokufarm.phil.hhu.de/spmrl2014/doku.php?id=shared_task_description
@@ -10,7 +10,7 @@ from .utils import split_sentences
 LATTICE_COLUMN_NAMES = ['START', 'END', 'FORM', 'LEMMA', 'CPOSTAG', 'FPOSTAG', 'FEATS', 'TOKEN_ID']
 
 # We transform the SPMRL lattice format into an enriched normalized format including sentence id, token and gold flag
-_lattice_fields = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
+# _lattice_fields = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
 
 
 def _build_spmrl_sample_rows(sent_id, lattice, tokens, is_gold):
@@ -35,7 +35,7 @@ def _load_partition_df(lattice_sentences, token_sentences, is_gold):
         tokens = {j + 1: t for j, t in enumerate(tokens)}
         lattice = [line.split() for line in lattice]
         partition.extend(_build_spmrl_sample_rows(sent_id, lattice, tokens, is_gold))
-    return pd.DataFrame(partition, columns=_lattice_fields)
+    return pd.DataFrame(partition, columns=lattice_fields)
 
 
 def load_spmrl(tb_root_path, partition, tb_name, ma_name):

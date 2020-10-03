@@ -1,5 +1,6 @@
 import logging
 import torch
+import torch.nn as nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import trange
@@ -9,7 +10,6 @@ from transformers import AutoTokenizer, AutoModel
 # AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 import dataset
 from model import MorphSegSeq2SeqModel, TokenCharEmbedding, Attention, AttnDecoder
-import fasttext_emb as ft
 from pathlib import Path
 
 
@@ -32,34 +32,37 @@ logging.info(f'{type(bert_tokenizer).__name__} loaded')
 
 # Data
 partition = ['train', 'dev', 'test']
-seg_data_partition = dataset.load_seg_tensor_dataset('data', partition, bert_tokenizer)  # TensorDataset
+dataset_partition = dataset.load_tensor_dataset(Path('data'), partition, bert_tokenizer)  # TensorDataset
 # seg_tag_data_partition = dataset.load_seg_tag_data('data', partition, bert_tokenizer)  # TensorDataset
 # host_data_partition = dataset.load_host_data('data', partition, bert_tokenizer)  # TensorDataset
 # host_multitag_data_partition = dataset.load_host_multitag_data('data', partition, bert_tokenizer)  # TensorDataset
 
 # Configuration
 train_batch_size = 1
-train_dataloader = DataLoader(seg_data_partition['train'], batch_size=train_batch_size, shuffle=False)
-dev_dataloader = DataLoader(seg_data_partition['dev'], batch_size=1)
-test_dataloader = DataLoader(seg_data_partition['test'], batch_size=1)
+train_dataloader = DataLoader(dataset_partition['train'], batch_size=train_batch_size, shuffle=False)
+dev_dataloader = DataLoader(dataset_partition['dev'], batch_size=1)
+test_dataloader = DataLoader(dataset_partition['test'], batch_size=1)
 epochs = 1
-lr = 1e-5
+lr = 1e-3
 optim_scheduler_warmup_steps = 1
 optim_step_every = 1
 optim_max_grad_norm = 5.0
 total_train_steps = (len(train_dataloader.dataset) // train_batch_size // optim_step_every // epochs)
 
 # Model
-ft_emb = ft.load_embedding(Path('data/ft_BertTokenizer.vec.txt'))
-token_char_emb = TokenCharEmbedding(ft_emb)
-emb = ft_emb
+ft_char_vectors, char2index = dataset.load_form_char_emb()
+index2char = {char2index[c]: c for c in char2index}
+# emb = TokenCharEmbedding(nn.Embedding.from_pretrained(ft_char_vectors, freeze=False, padding_idx=char2index['<pad>']))
+emb = nn.Embedding.from_pretrained(torch.tensor(ft_char_vectors, dtype=torch.float), freeze=False, padding_idx=char2index['<pad>'])
+
 hidden_size = emb.embedding_dim + bert.config.hidden_size
-vocab_size = bert_tokenizer.vocab_size
+# vocab_size = bert_tokenizer.vocab_size
+vocab_size = len(char2index)
 max_seq_len = bert.config.max_position_embeddings
 decoder_hidden_size = bert.config.hidden_size
 attn = Attention(hidden_size, vocab_size, max_seq_len)
 attn_decoder = AttnDecoder(emb, hidden_size, decoder_hidden_size, vocab_size, attn)
-seq2seq = MorphSegSeq2SeqModel(bert_tokenizer, bert, attn_decoder)
+seq2seq = MorphSegSeq2SeqModel(bert_tokenizer, bert, char2index, attn_decoder)
 # freeze all the parameters
 # for param in bert.parameters():
 #     param.requires_grad = False
@@ -78,18 +81,18 @@ def process(epoch, phase, model, data, optimizer=None):
         batch = tuple(t.to(device) for t in batch)
         b_in_xtoken_ids = batch[0]
         b_in_xtoken_mask = batch[1]
-        b_out_xform_ids = batch[2]
-        b_out_xform_mask = batch[3]
-        b_scores = model(b_in_xtoken_ids, b_in_xtoken_mask, b_out_xform_ids)
-        b_loss = model.loss(b_scores, b_out_xform_ids, b_out_xform_mask)
+        b_out_char_ids = batch[2]
+        b_out_char_mask = batch[3]
+        b_scores = model(b_in_xtoken_ids, b_in_xtoken_mask, b_out_char_ids)
+        b_loss = model.loss(b_scores, b_out_char_ids, b_out_char_mask)
         print(f'epoch {epoch}, {phase} step {i + 1}, loss: {b_loss}')
         if optimizer is not None:
             b_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
-        decoded_xform_ids = model.decode(b_scores)
-        decoded_segs = [bert_tokenizer.ids_to_tokens[xid.item()] for xid in decoded_xform_ids.squeeze(0)]
-        print(decoded_segs)
+        decoded_char_ids = model.decode(b_scores)
+        decoded_chars = [index2char[char_id.item()] for char_id in decoded_char_ids.squeeze(0)]
+        print(decoded_chars)
 
 
 device = None

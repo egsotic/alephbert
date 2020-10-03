@@ -4,6 +4,8 @@ from collections import defaultdict
 from copy import deepcopy
 import pandas as pd
 
+lattice_fields = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
+
 
 def split_sentences(file_path):
     with open(str(file_path)) as f:
@@ -66,7 +68,7 @@ def _lattice_to_dataframe(lattice, column_names):
 
 def _to_data_lattices(treebank):
     dataset = {}
-    column_names = _lattice_fields + ['analysis_id', 'morpheme_id']
+    column_names = lattice_fields + ['analysis_id', 'morpheme_id']
     for partition_type in treebank:
         lattices = [_parse_sent_analyses(df, column_names) for df in treebank[partition_type]]
         dataset[partition_type] = lattices

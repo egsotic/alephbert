@@ -83,6 +83,7 @@ class Decoder(nn.Module):
         output = self.embedding(seg_input).view(1, 1, -1)
         output = F.relu(output)
         output, hidden_state = self.gru(output, hidden_state)
+        output = self.out(output)
         return output, hidden_state
 
 
@@ -109,28 +110,29 @@ class AttnDecoder(nn.Module):
 
 class MorphSegSeq2SeqModel(nn.Module):
 
-    def __init__(self, xtokenizer, xmodel, decoder):
+    def __init__(self, xtokenizer, xmodel, char_vocab, decoder):
         super().__init__()
         self.xtokenizer = xtokenizer
         self.xmodel = xmodel
         self.decoder = decoder
+        self.char_vocab = char_vocab
         self.loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=0)
 
-    def forward(self, xtoken_ids, xtoken_mask, xform_ids):
-        enc_output, enc_hs = self.xmodel(xtoken_ids, attention_mask=xtoken_mask)
+    def forward(self, input_xtoken_ids, input_mask, output_char_ids):
+        enc_output, enc_hs = self.xmodel(input_xtoken_ids, attention_mask=input_mask)
         dec_hs = enc_hs.unsqueeze(1)
         gold_idx = 0
         scores = []
-        dec_seg_ind = xform_ids[0][gold_idx]
-        while xform_ids[0][gold_idx].item() != self.xtokenizer.vocab['[SEP]']:
-            dec_output, dec_hs = self.decoder(dec_seg_ind, dec_hs, enc_output)
+        dec_output_char_ind = output_char_ids[0][gold_idx]
+        while output_char_ids[0][gold_idx].item() != self.char_vocab['</s>']:
+            dec_output, dec_hs = self.decoder(dec_output_char_ind, dec_hs, enc_output)
             gold_idx += 1
-            dec_seg_ind = xform_ids[0][gold_idx]
+            dec_output_char_ind = output_char_ids[0][gold_idx]
             # gold_seg_ind = xform_ids[0][gold_idx]
             # gold_mask = xform_mask[0][gold_idx]
             # dec_seg_ind = gold_seg_ind if gold_mask else torch.tensor(self.xtokenizer.vocab['[SEP]'],
             #                                                           dtype=torch.long)
-            if xform_ids[0][gold_idx].item() != self.xtokenizer.vocab['[SEP]']:
+            if output_char_ids[0][gold_idx].item() != self.char_vocab['</s>']:
                 scores.append(dec_output)
                 # xforms = self.xtokenizer.ids_to_tokens[dec_seg_ind.item()]
                 # xchar_ids = torch.tensor([self.xtokenizer.vocab[c] for c in xforms])

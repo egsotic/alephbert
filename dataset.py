@@ -9,11 +9,11 @@ import fasttext_emb as ft
 from torch.utils.data import TensorDataset
 
 
-def xtokenize_token_data(partition, xtokenizer):
+def _xtokenize_tokens(partition, xtokenizer):
     xdata = {}
     for part in partition:
         df = partition[part]
-        logging.info(f'processing {part} input {type(xtokenizer).__name__} data')
+        logging.info(f'xtokenizing {part} {type(xtokenizer).__name__} tokens')
         raw_df = df[['sent_id', 'token_id', 'token']].drop_duplicates()
         xdf = pd.DataFrame([(row.sent_id, row.token_id, row.token, xt)
                             for index, row in raw_df.iterrows()
@@ -23,84 +23,107 @@ def xtokenize_token_data(partition, xtokenizer):
     return xdata
 
 
-def xtokenize_form_data(partition, xtokenizer):
+def _save_xdata(data_root_path, xdata, xtokenizer, data_type):
+    for part in xdata:
+        xdf = xdata[part]
+        xdata_file = Path(data_root_path) / f'{part}_{type(xtokenizer).__name__}_{data_type}.csv'
+        logging.info(f'saving: {xdata_file}')
+        xdf.to_csv(xdata_file)
+
+
+def _load_xdata(data_root_path, partition, xtokenizer, data_type):
     xdata = {}
     for part in partition:
-        df = partition[part]
-        raw_df = df[['sent_id', 'token_id', 'form']]
-        logging.info(f'processing {part} output {type(xtokenizer).__name__} seg data')
-        xdf = pd.DataFrame([(row.sent_id, row.token_id, row.form, xf)
-                            for index, row in raw_df.iterrows()
-                            for xf in xtokenizer.tokenize(row.form)],
-                           columns=['sent_id', 'token_id', 'form', 'xform'])
+        xdata_file = Path(data_root_path) / f'{part}_{type(xtokenizer).__name__}_{data_type}.csv'
+        logging.info(f'loading: {xdata_file}')
+        xdf = pd.read_csv(xdata_file, index_col=0)
         xdata[part] = xdf
     return xdata
 
 
-def save_xemb(xtokenizer):
-    xtokens = [xtokenizer.ids_to_tokens[xid] for xid in sorted(xtokenizer.ids_to_tokens)]
-    ft.load_embedding_weight_matrix(Path('/Users/Amit/dev/fastText/models/cc.he.300.bin'),
-                                    Path(f'data/ft_{type(xtokenizer).__name__}.vec.txt'), list(xtokens))
-
-
-def save_processed_input_data(data_root_path, input_data, xtokenizer):
-    for part in input_data:
-        input_df = input_data[part]
-        input_data_file = Path(data_root_path) / f'{part}_input_{type(xtokenizer).__name__}_token.csv'
-        logging.info(f'saving: {input_data_file}')
-        input_df.to_csv(input_data_file)
-
-
-def save_processed_output_seg_data(data_root_path, output_data, xtokenizer=None):
-    for part in output_data:
-        output_df = output_data[part]
-        if xtokenizer is not None:
-            output_data_file = Path(data_root_path) / f'{part}_output_{type(xtokenizer).__name__}_seg.csv'
-        else:
-            output_data_file = Path(data_root_path) / f'{part}_output_seg.csv'
-        logging.info(f'saving: {output_data_file}')
-        output_df.to_csv(output_data_file)
-
-
-def load_processed_input_data(data_root_path, partition, xtokenizer):
-    input_data = {}
+def _get_forms(partition):
+    data = {}
     for part in partition:
-        input_data_file = Path(data_root_path) / f'{part}_input_{type(xtokenizer).__name__}_token.csv'
-        logging.info(f'loading: {input_data_file}')
-        input_df = pd.read_csv(input_data_file, index_col=0)
-        input_data[part] = input_df
-    return input_data
+        df = partition[part]
+        raw_df = df[['sent_id', 'token_id', 'form']]
+        data[part] = raw_df
+    return data
 
 
-def load_processed_output_seg_data(data_root_path, partition, xtokenizer=None):
-    output_data = {}
+def _save_data(data_root_path, data, data_type):
+    for part in data:
+        df = data[part]
+        data_file = Path(data_root_path) / f'{part}_{data_type}.csv'
+        logging.info(f'saving: {data_file}')
+        df.to_csv(data_file)
+
+
+def _load_data(data_root_path, partition, data_type):
+    data = {}
     for part in partition:
-        if xtokenizer is not None:
-            output_data_file = Path(data_root_path) / f'{part}_output_{type(xtokenizer).__name__}_seg.csv'
-        else:
-            output_data_file = Path(data_root_path) / f'{part}_output_seg.csv'
-        logging.info(f'loading: {output_data_file}')
-        output_df = pd.read_csv(output_data_file, index_col=0)
-        output_data[part] = output_df
-    return output_data
+        data_file = Path(data_root_path) / f'{part}_{data_type}.csv'
+        logging.info(f'loading: {data_file}')
+        df = pd.read_csv(data_file, index_col=0)
+        data[part] = df
+    return data
 
 
-def to_seg_dataset(partition, input_data, output_data, xtokenizer):
+def _form_to_char_data(form_data):
+    char_data = {}
+    for part in form_data:
+        part_df = form_data[part]
+        char_data_rows = []
+        part_gb = part_df.groupby(part_df.sent_id)
+        for df in [part_gb.get_group(x).reset_index(drop=True) for x in part_gb.groups]:
+            for form_id, row in enumerate(df.itertuples()):
+                for c in row.form:
+                    char_data_rows.append([row.sent_id, row.token_id, form_id + 1, row.form, c])
+        char_df = pd.DataFrame(char_data_rows, columns=["sent_id", "token_id", "form_id", "form", "char"])
+        char_data[part] = char_df
+    return char_data
+
+
+def _convert_xtokens_to_ids(xtoken_df, xtokenizer, max_len):
+    xtoken_ids = xtokenizer.convert_tokens_to_ids(xtoken_df.xtoken)
+    xtoken_ids = [xtokenizer.cls_token_id] + xtoken_ids + [xtokenizer.sep_token_id]
+    mask = [1] * len(xtoken_ids)
+    fill_mask_len = max_len + 2 - len(xtoken_ids)
+    xtoken_ids += [xtokenizer.pad_token_id] * fill_mask_len
+    mask += [0] * fill_mask_len
+    return xtoken_ids, mask
+
+
+def _convert_form_chars_to_ids(form_char_df, form_char_vocab, max_len):
+    char_ids = []
+    form_gb = form_char_df.groupby(form_char_df.form_id)
+    for form_id, g in form_gb:
+        char_ids.extend([form_char_vocab[c] for c in g.char] + [form_char_vocab['<sep>']])
+    char_ids = [form_char_vocab['<s>']] + char_ids + [form_char_vocab['</s>']]
+    mask = [1] * len(char_ids)
+    mask[0] = 0
+    mask[-1] = 0
+    fill_mask_len = max_len + 2 - len(char_ids)
+    char_ids += [form_char_vocab['<pad>']] * fill_mask_len
+    mask += [0] * fill_mask_len
+    return char_ids, mask
+
+
+def _to_form_data(xtoken_data, xtokenizer, form_char_data, form_char_vocab):
     data_samples = {}
-    for part in partition:
-        logging.info(f'transforming seg dataset: {part} {type(xtokenizer).__name__}')
-        input_df = input_data[part]
-        output_df = output_data[part]
-        input_gb = input_df.groupby(input_df.sent_id)
-        output_gb = output_df.groupby(output_df.sent_id)
-        inputs = [input_gb.get_group(x).reset_index(drop=True) for x in input_gb.groups]
-        outputs = [output_gb.get_group(x).reset_index(drop=True) for x in output_gb.groups]
-        max_input_len = max([len(df) for df in inputs])
-        max_output_len = max([len(df) for df in outputs])
+    for part in xtoken_data:
         samples = []
-        for x, y in zip(inputs, outputs):
-            sample = _to_seg_sample(x, y, xtokenizer, max_input_len, max_output_len)
-            samples.append(sample)
+        xtoken_df = xtoken_data[part]
+        xtoken_gb = xtoken_df.groupby(xtoken_df.sent_id)
+        max_xtoken_len = max([len(df) for sent_id, df in xtoken_gb])
+
+        form_char_df = form_char_data[part]
+        form_char_gb = form_char_df.groupby(form_char_df.sent_id)
+        max_form_char_len = max([len(df) + df.form_id.unique()[-1] for sent_id, df in form_char_gb])
+        for sent_id, out_df in form_char_gb:
+            in_df = xtoken_gb.get_group(sent_id)
+            in_sample = _convert_xtokens_to_ids(in_df, xtokenizer, max_xtoken_len)
+            out_sample = _convert_form_chars_to_ids(out_df, form_char_vocab, max_form_char_len)
+            samples.append((*in_sample, *out_sample))
         input_ids = np.array([sample[0] for sample in samples], dtype=np.int)
         input_mask = np.array([sample[1] for sample in samples], dtype=np.int)
         output_ids = np.array([sample[2] for sample in samples], dtype=np.int)
@@ -109,27 +132,10 @@ def to_seg_dataset(partition, input_data, output_data, xtokenizer):
     return data_samples
 
 
-def _to_seg_sample(input_df, output_df, xtokenizer, max_input_len, max_output_len):
-    input_xtoken_ids = xtokenizer.convert_tokens_to_ids(input_df.xtoken)
-    input_xtoken_ids = [xtokenizer.cls_token_id] + input_xtoken_ids + [xtokenizer.sep_token_id]
-    input_xtoken_mask = [1] * len(input_xtoken_ids)
-    fill_input_xtoken_mask_len = max_input_len + 2 - len(input_xtoken_ids)
-    input_xtoken_ids += [xtokenizer.pad_token_id] * fill_input_xtoken_mask_len
-    input_xtoken_mask += [0] * fill_input_xtoken_mask_len
-
-    output_xform_ids = xtokenizer.convert_tokens_to_ids(output_df.xform)
-    output_xform_ids = [xtokenizer.cls_token_id] + output_xform_ids + [xtokenizer.sep_token_id]
-    output_xform_mask = [0] + [1] * (len(output_xform_ids) - 2) + [0]
-    fill_output_xform_mask_len = max_output_len + 2 - len(output_xform_ids)
-    output_xform_ids += [xtokenizer.pad_token_id] * fill_output_xform_mask_len
-    output_xform_mask += [0] * fill_output_xform_mask_len
-    return input_xtoken_ids, input_xtoken_mask, output_xform_ids, output_xform_mask
-
-
-def to_seg_tensor_dataset(partition, data_samples, xtokenizer):
+def _to_tensor_dataset(data_samples):
     tensor_data = {}
-    for part in partition:
-        logging.info(f'transforming seg tensor dataset: {part} {type(xtokenizer).__name__}')
+    for part in data_samples:
+        logging.info(f'transforming {part}')
         inputs_tensor = torch.tensor(data_samples[part][0], dtype=torch.long)
         inputs_mask_tensor = torch.tensor(data_samples[part][1], dtype=torch.long)
         outputs_tensor = torch.tensor(data_samples[part][2], dtype=torch.long)
@@ -138,53 +144,43 @@ def to_seg_tensor_dataset(partition, data_samples, xtokenizer):
     return tensor_data
 
 
-def save_seg_tensor_dataset(data_root_path, partition, tensor_data, xtokenizer):
-    for part in partition:
-        seg_tensor_data_file_path = Path(data_root_path) / f'{part}_{type(xtokenizer).__name__}_seg_tensor_dataset.pt'
-        logging.info(f'saving: {seg_tensor_data_file_path}')
-        torch.save(tensor_data[part], seg_tensor_data_file_path)
+def _save_tensor_dataset(data_root_path, tensor_data, xtokenizer):
+    for part in tensor_data:
+        data_file_path = Path(data_root_path) / f'{part}_{type(xtokenizer).__name__}_dataset.pt'
+        logging.info(f'saving: {data_file_path}')
+        torch.save(tensor_data[part], data_file_path)
 
 
-def load_seg_tensor_dataset(data_root_path, partition, xtokenizer):
+def load_tensor_dataset(data_root_path, partition, xtokenizer):
     tensor_data = {}
     for part in partition:
-        seg_tensor_data_file_path = Path(data_root_path) / f'{part}_{type(xtokenizer).__name__}_seg_tensor_dataset.pt'
-        logging.info(f'loading: {seg_tensor_data_file_path}')
-        tensor_samples = torch.load(seg_tensor_data_file_path)
+        data_file_path = Path(data_root_path) / f'{part}_{type(xtokenizer).__name__}_dataset.pt'
+        logging.info(f'loading: {data_file_path}')
+        tensor_samples = torch.load(data_file_path)
         tensor_data[part] = tensor_samples
     return tensor_data
 
 
-def load_tensor_data(roberta_tokenizer, bert_tokenizer):
-    partition = {'train': None, 'dev': None, 'test': None}
-    load_seg_tensor_dataset('data', partition, bert_tokenizer)
-    load_seg_tensor_dataset('data', partition, roberta_tokenizer)
+def _save_form_char_emb(partition):
+    # tokens = set(token for token in partition['train'].token)
+    # forms = set(form for form in partition['train'].form)
+    forms = set(form for part in partition for form in partition[part].form)
+    chars = set(c for form in forms for c in form)
+    # tokens = ['<pad>', '<sep>', '<s>', '</s>'] + list(tokens)
+    # forms = ['<pad>', '<sep>', '<s>', '</s>'] + list(forms)
+    chars = ['<pad>', '<sep>', '<s>', '</s>'] + list(chars)
+    # token_vectors, token2index = ft.get_word_vectors('he', Path('/Users/Amit/dev/fastText/models/cc.he.300.bin'), tokens)
+    # form_vectors, form2index = ft.get_word_vectors('he', Path('/Users/Amit/dev/fastText/models/cc.he.300.bin'), forms)
+    char_vectors, char2index = ft.get_word_vectors('he', Path('/Users/Amit/dev/fastText/models/cc.he.300.bin'), chars)
+    # ft.save_word_vectors(Path('data/ft_token.vec.txt'), token_vectors, token2index)
+    # ft.save_word_vectors(Path('data/ft_form.vec.txt'), form_vectors, form2index)
+    ft.save_word_vectors(Path('data/ft_char.vec.txt'), char_vectors, char2index)
 
 
-def save_tensor_data(roberta_tokenizer, bert_tokenizer):
-    partition = {'train': None, 'dev': None, 'test': None}
-    roberta_input_data = load_processed_input_data('data/processed/hebtb', partition, roberta_tokenizer)
-    bert_input_data = load_processed_input_data('data/processed/hebtb', partition, bert_tokenizer)
-    roberta_seg_output_data = load_processed_output_seg_data('data/processed/hebtb', partition, roberta_tokenizer)
-    bert_seg_output_data = load_processed_output_seg_data('data/processed/hebtb', partition, bert_tokenizer)
-    seg_dataset = to_seg_dataset(partition, bert_input_data, bert_seg_output_data, bert_tokenizer)
-    seg_tensor_dataset = to_seg_tensor_dataset(partition, seg_dataset, bert_tokenizer)
-    save_seg_tensor_dataset('data', partition, seg_tensor_dataset, bert_tokenizer)
-    seg_dataset = to_seg_dataset(partition, roberta_input_data, roberta_seg_output_data, roberta_tokenizer)
-    seg_tensor_dataset = to_seg_tensor_dataset(partition, seg_dataset, roberta_tokenizer)
-    save_seg_tensor_dataset('data', partition, seg_tensor_dataset, roberta_tokenizer)
-
-
-def save_processed_data(roberta_tokenizer, bert_tokenizer):
-    partition = tb.spmrl('data/raw')
-    roberta_input_data = xtokenize_token_data(partition, roberta_tokenizer)
-    save_processed_input_data('data/processed/hebtb', roberta_input_data, roberta_tokenizer)
-    bert_input_data = xtokenize_token_data(partition, bert_tokenizer)
-    save_processed_input_data('data/processed/hebtb', bert_input_data, bert_tokenizer)
-    roberta_seg_output_data = xtokenize_form_data(partition, roberta_tokenizer)
-    save_processed_output_seg_data('data/processed/hebtb', roberta_seg_output_data, roberta_tokenizer)
-    bert_seg_output_data = xtokenize_form_data(partition, bert_tokenizer)
-    save_processed_output_seg_data('data/processed/hebtb', bert_seg_output_data, bert_tokenizer)
+def load_form_char_emb():
+    # token_vectors, token2index = ft.load_word_vectors(Path(f'data/ft_token.vec.txt'))
+    # form_vectors, form2index = ft.load_word_vectors(Path(f'data/ft_form.vec.txt'))
+    return ft.load_word_vectors(Path(f'data/ft_char.vec.txt'))
 
 
 if __name__ == '__main__':
@@ -195,11 +191,24 @@ if __name__ == '__main__':
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO
     )
-    roberta_tokenizer = AutoTokenizer.from_pretrained("./experiments/transformers/roberta-bpe-byte-v1")
-    logging.info(f'{type(roberta_tokenizer).__name__} loaded')
+    # roberta_tokenizer = AutoTokenizer.from_pretrained("./experiments/transformers/roberta-bpe-byte-v1")
+    # logging.info(f'{type(roberta_tokenizer).__name__} loaded')
     bert_tokenizer = AutoTokenizer.from_pretrained("./experiments/transformers/bert-wordpiece-v1")
     logging.info(f'{type(bert_tokenizer).__name__} loaded')
-    # save_processed_data(roberta_tokenizer, bert_tokenizer)
-    save_tensor_data(roberta_tokenizer, bert_tokenizer)
-    load_tensor_data(roberta_tokenizer, bert_tokenizer)
-    # save_xemb(bert_tokenizer)
+    partition = tb.spmrl('data/raw')
+    # partition = {'train': None, 'dev': None, 'test': None}
+    _save_form_char_emb(partition)
+    char_vectors, char2index = load_form_char_emb()
+    xtoken_data = _xtokenize_tokens(partition, bert_tokenizer)
+    _save_xdata(Path('data/processed/hebtb'), xtoken_data, bert_tokenizer, 'token')
+    form_data = _get_forms(partition)
+    _save_data(Path('data/processed/hebtb'), form_data, 'form')
+    form_data = _load_data(Path('data/processed/hebtb'), partition, 'form')
+    char_data = _form_to_char_data(form_data)
+    _save_data(Path('data/processed/hebtb'), char_data, 'char')
+    xtoken_data = _load_xdata(Path('data/processed/hebtb'), partition, bert_tokenizer, 'token')
+    char_data = _load_data(Path('data/processed/hebtb'), partition, 'char')
+    data_samples = _to_form_data(xtoken_data, bert_tokenizer, char_data, char2index)
+    tensor_dataset = _to_tensor_dataset(data_samples)
+    _save_tensor_dataset(Path('data'), tensor_dataset, bert_tokenizer)
+    tensor_dataset = _load_tensor_dataset(Path('data'), partition, bert_tokenizer)
