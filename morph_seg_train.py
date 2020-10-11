@@ -2,14 +2,14 @@ import logging
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import AutoTokenizer, AutoModel
 # get_linear_schedule_with_warmup
 # AutoModelForMaskedLM, BertForMaskedLM, \
 # AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 import dataset
-from model import MorphSegSeq2SeqModel, TokenCharEmbedding, Attention, AttnDecoder
+from model import SegModel, TokenCharEmbedding, Attention, AttnDecoder
 from pathlib import Path
 
 
@@ -21,21 +21,46 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Language Model
-# roberta_lm = AutoModelForTokenClassification.from_pretrained("./experiments/transformers/roberta-bpe-byte-v1")
-# bert_lm = AutoModelForTokenClassification.from_pretrained("./experiments/transformers/bert-wordpiece-v1")
-bert = AutoModel.from_pretrained("./experiments/transformers/bert-wordpiece-v1")
-logging.info(f'{type(bert).__name__} loaded')
-# roberta_tokenizer = AutoTokenizer.from_pretrained("./experiments/transformers/roberta-bpe-byte-v1")
-bert_tokenizer = AutoTokenizer.from_pretrained("./experiments/transformers/bert-wordpiece-v1")
-logging.info(f'{type(bert_tokenizer).__name__} loaded')
+
+def get_tensor_dataset(data_path, partition, xtokenizer, char_vocab):
+    tensor_data = {}
+    tensor_data_files = [data_path / f'{part}_{type(xtokenizer).__name__}_data.pt' for part in partition]
+    if all([f.exists() for f in tensor_data_files]):
+        for part in partition:
+            tensor_data_file_path = data_path / f'{part}_{type(xtokenizer).__name__}_data.pt'
+            logging.info(f'loading tensor data from file {tensor_data_file_path}')
+            tensor_dataset = torch.load(tensor_data_file_path)
+            tensor_data[part] = tensor_dataset
+    else:
+        data = dataset.load_data(partition, xtokenizer, char_vocab)
+        for part in data:
+            xtoken_data, token_char_data, form_char_data = data[part]
+            xtoken_data = torch.tensor(xtoken_data, dtype=torch.long)
+            token_char_data = torch.tensor(token_char_data, dtype=torch.long)
+            form_char_data = torch.tensor(form_char_data, dtype=torch.long)
+            tensor_dataset = TensorDataset(xtoken_data, token_char_data, form_char_data)
+            tensor_data_file_path = data_path / f'{part}_{type(xtokenizer).__name__}_data.pt'
+            logging.info(f'saving tensor data to file {tensor_data_file_path}')
+            torch.save(tensor_dataset, tensor_data_file_path)
+            tensor_data[part] = tensor_dataset
+    return tensor_data
+
+
+# BERT Language Model
+bert_folder_path = Path('./experiments/transformers/bert-wordpiece-v1')
+logging.info(f'BERT folder path: {str(bert_folder_path)}')
+bert = AutoModel.from_pretrained(str(bert_folder_path))
+bert_tokenizer = AutoTokenizer.from_pretrained(str(bert_folder_path))
+logging.info('BERT model and tokenizer loaded')
+
+# FastText
+char_vectors, char2index = dataset.load_emb('char')
+logging.info('FastText char embedding vectors and vocab loaded')
 
 # Data
+# partition = tb.spmrl('data/raw')
 partition = ['train', 'dev', 'test']
-dataset_partition = dataset.load_tensor_dataset(Path('data'), partition, bert_tokenizer)  # TensorDataset
-# seg_tag_data_partition = dataset.load_seg_tag_data('data', partition, bert_tokenizer)  # TensorDataset
-# host_data_partition = dataset.load_host_data('data', partition, bert_tokenizer)  # TensorDataset
-# host_multitag_data_partition = dataset.load_host_multitag_data('data', partition, bert_tokenizer)  # TensorDataset
+dataset_partition = get_tensor_dataset(Path('data'), partition, bert_tokenizer, char2index)
 
 # Configuration
 train_batch_size = 1
@@ -50,24 +75,23 @@ optim_max_grad_norm = 5.0
 total_train_steps = (len(train_dataloader.dataset) // train_batch_size // optim_step_every // epochs)
 
 # Model
-ft_char_vectors, char2index = dataset.load_form_char_emb()
 index2char = {char2index[c]: c for c in char2index}
-# emb = TokenCharEmbedding(nn.Embedding.from_pretrained(ft_char_vectors, freeze=False, padding_idx=char2index['<pad>']))
-emb = nn.Embedding.from_pretrained(torch.tensor(ft_char_vectors, dtype=torch.float), freeze=False, padding_idx=char2index['<pad>'])
-
-hidden_size = emb.embedding_dim + bert.config.hidden_size
+char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float),
+                                        freeze=False, padding_idx=char2index['<pad>'])
+# char_emb = TokenCharEmbedding(char_emb, bert.config.hidden_size)
+hidden_size = char_emb.embedding_dim + bert.config.hidden_size * 2
 # vocab_size = bert_tokenizer.vocab_size
 vocab_size = len(char2index)
 max_seq_len = bert.config.max_position_embeddings
 decoder_hidden_size = bert.config.hidden_size
 attn = Attention(hidden_size, vocab_size, max_seq_len)
-attn_decoder = AttnDecoder(emb, hidden_size, decoder_hidden_size, vocab_size, attn)
-seq2seq = MorphSegSeq2SeqModel(bert_tokenizer, bert, char2index, attn_decoder)
+attn_decoder = AttnDecoder(char_emb, hidden_size, decoder_hidden_size, vocab_size, attn)
+seg_model = SegModel(bert_tokenizer, bert, char2index, attn_decoder)
 # freeze all the parameters
-# for param in bert.parameters():
-#     param.requires_grad = False
-# parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-parameters = seq2seq.parameters()
+for param in bert.parameters():
+    param.requires_grad = False
+parameters = list(filter(lambda p: p.requires_grad, seg_model.parameters()))
+# parameters = seg_model.parameters()
 
 # Optimization
 adam = AdamW(parameters, lr=lr)
@@ -79,12 +103,13 @@ adam = AdamW(parameters, lr=lr)
 def process(epoch, phase, model, data, optimizer=None):
     for i, batch in enumerate(data):
         batch = tuple(t.to(device) for t in batch)
-        b_in_xtoken_ids = batch[0]
-        b_in_xtoken_mask = batch[1]
-        b_out_char_ids = batch[2]
-        b_out_char_mask = batch[3]
-        b_scores = model(b_in_xtoken_ids, b_in_xtoken_mask, b_out_char_ids)
-        b_loss = model.loss(b_scores, b_out_char_ids, b_out_char_mask)
+        input_xtokens = batch[0][:, :, 1]
+        input_mask = input_xtokens != model.xtokenizer.pad_token_id
+        token_chars = batch[1][:, :, 1:]
+        output_chars = batch[2][:, :, 1]
+        output_mask = output_chars != model.char_vocab['<pad>']
+        b_scores = model(input_xtokens, input_mask, token_chars, output_chars)
+        b_loss = model.loss(b_scores, output_chars, output_mask)
         print(f'epoch {epoch}, {phase} step {i + 1}, loss: {b_loss}')
         if optimizer is not None:
             b_loss.backward()
@@ -92,17 +117,18 @@ def process(epoch, phase, model, data, optimizer=None):
             optimizer.zero_grad()
         decoded_char_ids = model.decode(b_scores)
         decoded_chars = [index2char[char_id.item()] for char_id in decoded_char_ids.squeeze(0)]
-        print(decoded_chars)
+        decoded_chars = [' ' if c == '<sep>' else c for c in decoded_chars]
+        print(''.join(decoded_chars))
 
 
 device = None
 if device is not None:
-    seq2seq.to(device)
-print(seq2seq)
+    seg_model.to(device)
+print(seg_model)
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
-    seq2seq.train()
-    process(epoch, 'train', seq2seq, train_dataloader, adam)
-    seq2seq.eval()
+    seg_model.train()
+    process(epoch, 'train', seg_model, train_dataloader, adam)
+    seg_model.eval()
     with torch.no_grad():
-        samples = process(epoch, 'dev', seq2seq, dev_dataloader)
+        samples = process(epoch, 'dev', seg_model, dev_dataloader)

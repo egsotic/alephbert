@@ -2,6 +2,7 @@ import gzip
 from pathlib import Path
 import fasttext
 import numpy as np
+import logging
 
 
 ft_models = {}
@@ -54,7 +55,7 @@ def _load_vec_file(path: Path) -> (dict, list):
 
 
 def load_word_vectors(vec_file_path: Path):
-    print(f"Loading FastText vectors from {vec_file_path}")
+    logging.info(f'Loading FastText vectors from {vec_file_path}')
     word2index, vectors = _load_vec_file(vec_file_path)
     word_vectors = np.array([vectors[word2index[word]] for word in word2index], dtype=np.float)
     return word_vectors, word2index
@@ -63,11 +64,14 @@ def load_word_vectors(vec_file_path: Path):
 def get_word_vectors(lang, model_path, words: list):
     global ft_models
     if lang not in ft_models:
-        print(f"Loading FastText model from {model_path}")
+        logging.info(f'Loading FastText model from {model_path}')
         ft_models[lang] = fasttext.load_model(f'{model_path}')
-    word2index = {word: i+1 for i, word in enumerate(sorted(words))}
+    # word2index = {word: i+1 for i, word in enumerate(sorted(words))}
+    # word_vectors = np.stack([ft_models[lang].get_word_vector(word) if word.lower() != '<pad>' else ft_pad_vector
+    #                          for word in sorted(words)], axis=0)
+    word2index = {word: i + 1 for i, word in enumerate(words)}
     word_vectors = np.stack([ft_models[lang].get_word_vector(word) if word.lower() != '<pad>' else ft_pad_vector
-                             for word in sorted(words)], axis=0)
+                             for word in words], axis=0)
     return word_vectors, word2index
 
 
