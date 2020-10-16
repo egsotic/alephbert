@@ -9,7 +9,7 @@ from transformers import AutoTokenizer, AutoModel
 # AutoModelForMaskedLM, BertForMaskedLM, \
 # AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 import dataset
-from model import SegModel, TokenCharEmbedding, Attention, AttnDecoder
+from model2 import Model, TokenCharEmbedding, Attention, AttnDecoder
 from pathlib import Path
 
 
@@ -68,7 +68,7 @@ train_dataloader = DataLoader(dataset_partition['train'], batch_size=train_batch
 dev_dataloader = DataLoader(dataset_partition['dev'], batch_size=1)
 test_dataloader = DataLoader(dataset_partition['test'], batch_size=1)
 epochs = 1
-lr = 1e-3
+lr = 1e-5
 optim_scheduler_warmup_steps = 1
 optim_step_every = 1
 optim_max_grad_norm = 5.0
@@ -78,20 +78,12 @@ total_train_steps = (len(train_dataloader.dataset) // train_batch_size // optim_
 index2char = {char2index[c]: c for c in char2index}
 char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float),
                                         freeze=False, padding_idx=char2index['<pad>'])
-# char_emb = TokenCharEmbedding(char_emb, bert.config.hidden_size)
-hidden_size = char_emb.embedding_dim + bert.config.hidden_size * 2
-# vocab_size = bert_tokenizer.vocab_size
-vocab_size = len(char2index)
-max_seq_len = bert.config.max_position_embeddings
-decoder_hidden_size = bert.config.hidden_size
-attn = Attention(hidden_size, vocab_size, max_seq_len)
-attn_decoder = AttnDecoder(char_emb, hidden_size, decoder_hidden_size, vocab_size, attn)
-seg_model = SegModel(bert_tokenizer, bert, char2index, attn_decoder)
+seg_model = Model(bert, char_emb, char2index, enc_num_layers=1, enc_dropout=0.0, dec_num_layers=1, dec_dropout=0.0)
 # freeze all the parameters
-for param in bert.parameters():
-    param.requires_grad = False
-parameters = list(filter(lambda p: p.requires_grad, seg_model.parameters()))
-# parameters = seg_model.parameters()
+# for param in bert.parameters():
+#     param.requires_grad = False
+# parameters = list(filter(lambda p: p.requires_grad, seg_model.parameters()))
+parameters = seg_model.parameters()
 
 # Optimization
 adam = AdamW(parameters, lr=lr)
@@ -104,7 +96,7 @@ def process(epoch, phase, model, data, optimizer=None):
     for i, batch in enumerate(data):
         batch = tuple(t.to(device) for t in batch)
         input_xtokens = batch[0][:, :, 1]
-        input_mask = input_xtokens != model.xtokenizer.pad_token_id
+        input_mask = input_xtokens != bert_tokenizer.pad_token_id
         token_chars = batch[1][:, :, 1:]
         output_chars = batch[2][:, :, 1]
         output_mask = output_chars != model.char_vocab['<pad>']
