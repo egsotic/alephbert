@@ -12,17 +12,17 @@ tokenizer_type = 'wordpiece'
 transformer_type = 'bert'
 
 
-def get_config():
+def get_config(vocab_size):
     if transformer_type == 'roberta':
         return RobertaConfig(
-            vocab_size=52000,
+            vocab_size=vocab_size,
             max_position_embeddings=514,
             num_attention_heads=12,
             num_hidden_layers=6,
             type_vocab_size=1,
         )
     return BertConfig(
-        vocab_size=52000,
+        vocab_size=vocab_size,
         max_position_embeddings=514,
         num_attention_heads=12,
         num_hidden_layers=6,
@@ -30,15 +30,15 @@ def get_config():
     )
 
 
-def get_tokenizer():
-    pretrained_tokenizer_path = f'models/tokenizer/{tokenizer_type}'
+def get_tokenizer(vocab_size):
+    pretrained_tokenizer_path = f'./experiments/tokenizers/{tokenizer_type}-{vocab_size}'
     if transformer_type == 'roberta':
         return RobertaTokenizerFast.from_pretrained(pretrained_tokenizer_path, max_len=512)
     return BertTokenizerFast.from_pretrained(pretrained_tokenizer_path, max_len=512)
 
 
-def get_model():
-    config = get_config()
+def get_model(vocab_size):
+    config = get_config(vocab_size)
     if transformer_type == 'roberta':
         return RobertaForMaskedLM(config=config)
     return BertForMaskedLM(config=config)
@@ -52,22 +52,24 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-tokenizer = get_tokenizer()
-model = get_model()
+# vocab_size = 52000
+vocab_size = 2000
+tokenizer = get_tokenizer(vocab_size)
+model = get_model(vocab_size)
 print(model.num_parameters())
 train_dataset = LineByLineTextDataset(
     tokenizer=tokenizer,
-    file_path="./data/oscar/he_dedup-train.txt",
+    file_path='./data/oscar/he_dedup-train.txt',
     block_size=128,
 )
 dev_dataset = LineByLineTextDataset(
     tokenizer=tokenizer,
-    file_path="./data/oscar/he_dedup-eval.txt",
+    file_path='./data/oscar/he_dedup-eval.txt',
     block_size=128,
 )
 data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer)
 training_args = TrainingArguments(
-    output_dir=f'./models/{transformer_type}-{tokenizer_type}-v1',
+    output_dir=f'./experiments/transformers/{transformer_type}-{tokenizer_type}-{vocab_size}',
     overwrite_output_dir=True,
     num_train_epochs=1,
     per_device_train_batch_size=32,
@@ -103,4 +105,3 @@ trainer.train()
 trainer.save_model()
 # For convenience, we also re-save the tokenizer to the same directory, so that you can share your model easily
 tokenizer.save_pretrained(training_args.output_dir)
-

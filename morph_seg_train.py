@@ -9,7 +9,7 @@ from transformers import AutoTokenizer, AutoModel
 # AutoModelForMaskedLM, BertForMaskedLM, \
 # AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 import dataset
-from model2 import Model, TokenCharEmbedding, Attention, AttnDecoder
+from model2 import Model
 from pathlib import Path
 
 

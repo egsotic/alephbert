@@ -7,7 +7,7 @@ from tokenizers import ByteLevelBPETokenizer, CharBPETokenizer, BertWordPieceTok
 tokenizer_type = 'wordpiece'
 
 
-def train_tokenizer(data_file_paths):
+def train_tokenizer(data_file_paths, vocab_size):
     special_tokens = ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
     wordpieces_prefix = None
     if tokenizer_type == 'byte':
@@ -20,7 +20,7 @@ def train_tokenizer(data_file_paths):
         wordpieces_prefix = "##"
     t.train(
         files=data_file_paths,
-        vocab_size=52000,
+        vocab_size=vocab_size,
         min_frequency=2,
         show_progress=True,
         special_tokens=special_tokens,
@@ -38,6 +38,8 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+# vocab_size = 52000
+vocab_size = 2000
 paths = [str(x) for x in Path("data").glob("oscar/he_dedup.txt")]
-tokenizer = train_tokenizer(paths)
-tokenizer.save_model(f'models/tokenizer/{tokenizer_type}')
+tokenizer = train_tokenizer(paths, vocab_size)
+tokenizer.save_model(f'./experiments/tokenizers/{tokenizer_type}-{vocab_size}')
