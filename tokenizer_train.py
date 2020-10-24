@@ -40,6 +40,6 @@ logging.basicConfig(
 
 # vocab_size = 52000
 vocab_size = 2000
-paths = [str(x) for x in Path("data").glob("oscar/he_dedup.txt")]
+paths = [str(x) for x in Path("data/raw").glob("oscar/he_dedup≥.txt")]
 tokenizer = train_tokenizer(paths, vocab_size)
 tokenizer.save_model(f'./experiments/tokenizers/{tokenizer_type}-{vocab_size}')

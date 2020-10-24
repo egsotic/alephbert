@@ -348,6 +348,55 @@ def load_data(partition, xtokenizer, char_vocab):
     return data
 
 
+def _to_segmented_rows(input_token_chars, sent_form_chars, char_vocab):
+    sep_char = char_vocab['char2index']['<sep>']
+    token_ids = sent_form_chars[:, :, 0]
+    token_ids = token_ids[token_ids != 0]
+    num_tokens = 0 if len(token_ids) == 0 else token_ids[-1]
+    rows = []
+    for token_id in range(1, num_tokens+1):
+        tokens = input_token_chars[:, :][input_token_chars[:, :, 0] == token_id]
+        token_chars = tokens[:, 2]
+        chars = [char_vocab['index2char'][c] for c in token_chars]
+        token = ''.join(chars)
+        segments = sent_form_chars[:, 1:][sent_form_chars[:, 1:, 0] == token_id]
+        segments_chars = segments[:, 1]
+        chars = [' ' if c == sep_char else char_vocab['index2char'][c] for c in segments_chars[:-1]]
+        rows.extend([(token_id, token, seg) for seg in ''.join(chars).split(' ')])
+    return rows
+
+
+def to_raw_data(seg_data, char_vocab):
+    lattice_rows = []
+    for data in seg_data:
+        sent_ids, token_chars, form_chars = data
+        sent_id = sent_ids[0, 0]
+        seg_rows = _to_segmented_rows(token_chars, form_chars, char_vocab)
+
+        token_id_rows = [r[0] for r in seg_rows]
+        token_rows = [r[1] for r in seg_rows]
+        form_rows = [r[2] for r in seg_rows]
+        start_offset_rows = list(range(len(seg_rows)))
+        end_offset_rows = list(range(1, len(seg_rows) + 1))
+        sent_id_rows = [sent_id.item()] * len(seg_rows)
+        is_gold_rows = [True] * len(seg_rows)
+
+        for sid, start, end, form, tid, token, is_gold in zip(sent_id_rows, start_offset_rows, end_offset_rows,
+                                                              form_rows, token_id_rows, token_rows, is_gold_rows):
+            lattice_rows.append([sid, start, end, form, '_', '_', '_', tid, token, is_gold])
+    return pd.DataFrame(lattice_rows, columns=['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats',
+                                               'token_id', 'token', 'is_gold'])
+
+
+def intersect_truth_data(truth_data, pred_data):
+    columns = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
+    truth_data = pd.merge(truth_data, pred_data, how='inner', on=['sent_id', 'token_id'])
+    columns_x = [f'{c}_x' if c not in ['sent_id', 'token_id'] else c for c in columns]
+    truth_data = truth_data[columns_x]
+    truth_data.columns = columns
+    return truth_data
+
+
 if __name__ == '__main__':
     # Setup logging
     logger = logging.getLogger(__name__)

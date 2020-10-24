@@ -1,5 +1,6 @@
 # import sys
 # sys.path.insert(0, "/Users/Amit/dev/aseker00/AlephBert/src/bclm")
+from collections import Counter
 from pathlib import Path
 import pandas as pd
 import logging
@@ -34,6 +35,30 @@ def spmrl(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
     #     logging.info(f'{tb_name} {part} lattices: {len(tb[part])}')
     # return tb
     return partition
+
+
+def seg_eval(gold_df, pred_df, use_mset):
+    gold_gb = gold_df.groupby([gold_df.sent_id, gold_df.token_id])
+    pred_gb = pred_df.groupby([pred_df.sent_id, pred_df.token_id])
+    gold_counts, pred_counts, intersection_counts = 0, 0, 0
+    for (sent_id, token_id), gold in sorted(gold_gb):
+        pred = pred_gb.get_group((sent_id, token_id))
+        if use_mset:
+            gold_count, pred_count = Counter(gold.form.tolist()), Counter(pred.form.tolist())
+            intersection_count = gold_count & pred_count
+            gold_counts += sum(gold_count.values())
+            pred_counts += sum(pred_count.values())
+            intersection_counts += sum(intersection_count.values())
+        else:
+            gold_forms, pred_forms = gold.form.tolist(), pred.form.tolist()
+            intersection_forms = [p for g, p in zip(gold_forms, pred_forms) if p == g]
+            gold_counts += len(gold_forms)
+            pred_counts += len(pred_forms)
+            intersection_counts += len(intersection_forms)
+    precision = intersection_counts / pred_counts if pred_counts else 0.0
+    recall = intersection_counts / gold_counts if gold_counts else 0.0
+    f1 = 2.0 * (precision * recall) / (precision + recall) if precision + recall else 0.0
+    return precision, recall, f1
 
 
 def main():
