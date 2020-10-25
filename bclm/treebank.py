@@ -42,15 +42,19 @@ def seg_eval(gold_df, pred_df, use_mset):
     pred_gb = pred_df.groupby([pred_df.sent_id, pred_df.token_id])
     gold_counts, pred_counts, intersection_counts = 0, 0, 0
     for (sent_id, token_id), gold in sorted(gold_gb):
-        pred = pred_gb.get_group((sent_id, token_id))
+        gold_forms = gold.form.tolist()
+        if (sent_id, token_id) not in pred_gb.groups:
+            pred_forms = []
+        else:
+            pred = pred_gb.get_group((sent_id, token_id))
+            pred_forms = pred.form.tolist()
         if use_mset:
-            gold_count, pred_count = Counter(gold.form.tolist()), Counter(pred.form.tolist())
+            gold_count, pred_count = Counter(gold_forms), Counter(pred_forms)
             intersection_count = gold_count & pred_count
             gold_counts += sum(gold_count.values())
             pred_counts += sum(pred_count.values())
             intersection_counts += sum(intersection_count.values())
         else:
-            gold_forms, pred_forms = gold.form.tolist(), pred.form.tolist()
             intersection_forms = [p for g, p in zip(gold_forms, pred_forms) if p == g]
             gold_counts += len(gold_forms)
             pred_counts += len(pred_forms)

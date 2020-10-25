@@ -1,3 +1,4 @@
+import itertools
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -113,7 +114,8 @@ class ProcessedDataSamples:
         xtoken_data = self._to_xtoken_data(samples)
         token_char_data = self._to_token_char_data(samples)
         form_char_data = self._to_form_char_data(samples)
-        return xtoken_data, token_char_data, form_char_data
+        token_form_char_data = self._to_token_form_char_data(form_char_data)
+        return xtoken_data, token_char_data, form_char_data, token_form_char_data
 
     def _to_xtoken_data(self, samples):
         max_len = max([len(sample.processed_token_df.xtoken) + 2 for sample in samples])
@@ -162,17 +164,17 @@ class ProcessedDataSamples:
             sample_forms = sample.processed_form_char_df.form.tolist()
             sample_form_ids = sample.processed_form_char_df.form_id.to_numpy()
             form_pos = sample_form_ids[:-1] != sample_form_ids[1:]
-            form_pos = np.where(form_pos)[0] + 1
+            form_pos = np.where(form_pos)[0]
             sample_form_ids = sample_form_ids.tolist()
             for i, pos in enumerate(form_pos):
-                sample_chars.insert(pos + i, '<sep>')
-                sample_tokens.insert(pos + i, sample_tokens[pos + i])
-                sample_token_ids.insert(pos + i, sample_token_ids[pos + i])
-                sample_forms.insert(pos + i, sample_forms[pos + i])
-                sample_form_ids.insert(pos + i, sample_form_ids[pos + i])
+                sample_chars.insert(pos + i + 1, '<sep>')
+                sample_tokens.insert(pos + i + 1, sample_tokens[pos + i])
+                sample_token_ids.insert(pos + i + 1, sample_token_ids[pos + i])
+                sample_forms.insert(pos + i + 1, sample_forms[pos + i])
+                sample_form_ids.insert(pos + i + 1, sample_form_ids[pos + i])
             sample_token_ids = np.array(sample_token_ids)
             token_pos = sample_token_ids[:-1] != sample_token_ids[1:]
-            token_pos = np.where(token_pos)[0] + 1
+            token_pos = np.where(token_pos)[0]
             sample_token_ids = sample_token_ids.tolist()
             for pos in token_pos:
                 sample_chars[pos] = '</s>'
@@ -183,9 +185,9 @@ class ProcessedDataSamples:
             sample_form_ids.insert(0, 0)
             sample_chars.append('</s>')
             sample_tokens.append('</s>')
-            sample_token_ids.append(-1)
+            sample_token_ids.append(sample_token_ids[-1])
             sample_forms.append('</s>')
-            sample_form_ids.append(-1)
+            sample_form_ids.append(sample_form_ids[-1])
             sample_sent_id = [sample.processed_form_char_df.sent_id.unique()[0] for _ in sample_chars]
             processed_samples.append((sample_sent_id, sample_tokens, sample_token_ids, sample_forms, sample_form_ids, sample_chars))
 
@@ -207,6 +209,37 @@ class ProcessedDataSamples:
             chars.extend(sample_chars)
         return pd.DataFrame(zip(sent_ids, tokens, token_ids, forms, form_ids, chars),
                             columns=['sent_id', 'token', 'token_id', 'form', 'form_id', 'char'])
+
+    def _to_token_form_char_data(self, form_char_data):
+        rows = []
+        gb = form_char_data.groupby(['sent_id', 'token_id'])
+        max_form_len = max([len(group) for key, group in gb if key[1] != -1])
+        max_num_tokens = max([key[1] for key, group in gb])
+        sent_gb = form_char_data.groupby(['sent_id'])
+        for sent_id, sent_group in sent_gb:
+            token_gb = sent_group.groupby('token_id')
+            sent_rows = []
+            token_id = 0
+            for token_id, token_group in token_gb:
+                if token_id == -1:
+                    continue
+                group_rows = token_group.to_numpy().tolist()
+                for row in group_rows:
+                    row.extend([max_num_tokens, max_form_len])
+                if token_id == 0:
+                    sent_rows.extend(group_rows)
+                else:
+                    fill_row = [sent_id, token_group.token.unique()[0], token_id, '<pad>', -1, '<pad>', max_num_tokens, max_form_len]
+                    fill_len = max_form_len - len(group_rows)
+                    fill_rows = [fill_row] * fill_len
+                    sent_rows.extend(group_rows)
+                    sent_rows.extend(fill_rows)
+            fill_row = [sent_id, '<pad>', -1, '<pad>', -1, '<pad>', max_num_tokens, max_form_len]
+            fill_len = max_form_len * (max_num_tokens - token_id)
+            fill_rows = [fill_row] * fill_len
+            sent_rows.extend(fill_rows)
+            rows.extend(sent_rows)
+        return pd.DataFrame(rows, columns=['sent_id', 'token', 'token_id', 'form', 'form_id', 'char', 'max_num_tokens', 'max_form_len'])
 
     def __len__(self):
         raw_gb = self.raw_df.groupby(self.raw_df.sent_id)
@@ -301,7 +334,7 @@ def _save_data(partition, xtokenizer, char_vocab, processed_path):
     for part in partition:
         logging.info(f'loading {part} samples')
         samples = data_samples_builder.load_samples(partition[part], part, processed_path)
-        xtoken_data, token_char_data, form_char_data = samples.to_data()
+        xtoken_data, token_char_data, form_char_data, token_form_char_data = samples.to_data()
         token_file = Path('data') / f'{part}_{type(xtokenizer).__name__}_xtoken.csv'
         logging.info(f'saving {token_file}')
         xtoken_data.to_csv(str(token_file))
@@ -311,6 +344,9 @@ def _save_data(partition, xtokenizer, char_vocab, processed_path):
         form_char_file = Path('data') / f'{part}_{type(xtokenizer).__name__}_form_char.csv'
         logging.info(f'saving {form_char_file}')
         form_char_data.to_csv(str(form_char_file))
+        token_form_char_file = Path('data') / f'{part}_{type(xtokenizer).__name__}_token_form_char.csv'
+        logging.info(f'saving {token_form_char_file}')
+        token_form_char_data.to_csv(str(token_form_char_file))
 
 
 def load_emb(data_type):
@@ -324,27 +360,39 @@ def load_data(partition, xtokenizer, char_vocab):
         logging.info(f'loading {token_file}')
         xtoken_data = pd.read_csv(str(token_file), index_col=0)
         xtoken_data['xtoken'] = xtoken_data['xtoken'].apply(lambda x: xtokenizer.convert_tokens_to_ids(x))
-        xtoken_groups = xtoken_data.groupby(xtoken_data.sent_id)
+        xtoken_groups = xtoken_data.groupby('sent_id')
         # logging.info(f'{part} xtoken samples # = {len(xtoken_groups)}')
-        xtoken_data = np.stack([sent_df.to_numpy() for sent_id, sent_df in xtoken_groups], axis=0)
+        xtoken_data = np.stack([sent_df.to_numpy() for _, sent_df in xtoken_groups], axis=0)
+
         token_char_file = Path('data') / f'{part}_{type(xtokenizer).__name__}_token_char.csv'
         logging.info(f'loading {token_char_file}')
         token_char_data = pd.read_csv(str(token_char_file), index_col=0)
         token_char_data['char'] = token_char_data['char'].apply(lambda x: char_vocab[x])
         token_char_data['xtoken'] = token_char_data['xtoken'].apply(lambda x: xtokenizer.convert_tokens_to_ids(x))
         token_char_data = token_char_data[['sent_id', 'token_id', 'xtoken_id', 'char']]
-        token_char_groups = token_char_data.groupby(token_char_data.sent_id)
+        token_char_groups = token_char_data.groupby('sent_id')
         # logging.info(f'{part} token char samples # = {len(token_char_groups)}')
         token_char_data = np.stack([sent_df.to_numpy() for sent_id, sent_df in token_char_groups], axis=0)
+
         form_char_file = Path('data') / f'{part}_{type(xtokenizer).__name__}_form_char.csv'
         logging.info(f'loading {form_char_file}')
         form_char_data = pd.read_csv(str(form_char_file), index_col=0)
         form_char_data['char'] = form_char_data['char'].apply(lambda x: char_vocab[x])
         form_char_data = form_char_data[['sent_id', 'char']]
-        form_char_groups = form_char_data.groupby(form_char_data.sent_id)
+        form_char_groups = form_char_data.groupby('sent_id')
         # logging.info(f'{part} form char samples # = {len(form_char_groups)}')
         form_char_data = np.stack([sent_df.to_numpy() for sent_id, sent_df in form_char_groups], axis=0)
-        data[part] = (xtoken_data, token_char_data, form_char_data)
+
+        token_form_char_file = Path('data') / f'{part}_{type(xtokenizer).__name__}_token_form_char.csv'
+        logging.info(f'loading {token_form_char_file}')
+        token_form_char_data = pd.read_csv(str(token_form_char_file), index_col=0)
+        token_form_char_data['char'] = token_form_char_data['char'].apply(lambda x: char_vocab[x])
+        token_form_char_data = token_form_char_data[['sent_id', 'char', 'max_num_tokens', 'max_form_len']]
+        token_form_char_groups = token_form_char_data.groupby(['sent_id'])
+        # logging.info(f'{part} token form char samples # = {len(token_form_char_groups)}')
+        token_form_char_data = np.stack([sent_df.to_numpy() for _, sent_df in token_form_char_groups], axis=0)
+
+        data[part] = (xtoken_data, token_char_data, form_char_data, token_form_char_data)
     return data
 
 
@@ -359,7 +407,7 @@ def _to_segmented_rows(input_token_chars, sent_form_chars, char_vocab):
         token_chars = tokens[:, 2]
         chars = [char_vocab['index2char'][c] for c in token_chars]
         token = ''.join(chars)
-        segments = sent_form_chars[:, 1:][sent_form_chars[:, 1:, 0] == token_id]
+        segments = sent_form_chars[:, :][sent_form_chars[:, :, 0] == token_id]
         segments_chars = segments[:, 1]
         chars = [' ' if c == sep_char else char_vocab['index2char'][c] for c in segments_chars[:-1]]
         rows.extend([(token_id, token, seg) for seg in ''.join(chars).split(' ')])
@@ -388,15 +436,6 @@ def to_raw_data(seg_data, char_vocab):
                                                'token_id', 'token', 'is_gold'])
 
 
-def intersect_truth_data(truth_data, pred_data):
-    columns = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
-    truth_data = pd.merge(truth_data, pred_data, how='inner', on=['sent_id', 'token_id'])
-    columns_x = [f'{c}_x' if c not in ['sent_id', 'token_id'] else c for c in columns]
-    truth_data = truth_data[columns_x]
-    truth_data.columns = columns
-    return truth_data
-
-
 if __name__ == '__main__':
     # Setup logging
     logger = logging.getLogger(__name__)
@@ -411,7 +450,7 @@ if __name__ == '__main__':
     logging.info(f'{type(bert_tokenizer).__name__} loaded')
     partition = tb.spmrl('data/raw')
     # partition = ['train', 'dev', 'test']
-    _save_emb(partition)
+    # _save_emb(partition)
     char_vectors, char2index = load_emb('char')
     # _save_samples(partition, bert_tokenizer, char2index, Path('data/processed/hebtb'))
     _save_data(partition, bert_tokenizer, char2index, Path('data/processed/hebtb'))

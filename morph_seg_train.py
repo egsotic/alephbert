@@ -47,11 +47,12 @@ def get_tensor_dataset(data_path, partition, xtokenizer, char_vocab):
     else:
         data = dataset.load_data(partition, xtokenizer, char_vocab)
         for part in data:
-            xtoken_data, token_char_data, form_char_data = data[part]
+            xtoken_data, token_char_data, form_char_data, token_form_char_data = data[part]
             xtoken_data = torch.tensor(xtoken_data, dtype=torch.long)
             token_char_data = torch.tensor(token_char_data, dtype=torch.long)
             form_char_data = torch.tensor(form_char_data, dtype=torch.long)
-            tensor_dataset = TensorDataset(xtoken_data, token_char_data, form_char_data)
+            token_form_char_data = torch.tensor(token_form_char_data, dtype=torch.long)
+            tensor_dataset = TensorDataset(xtoken_data, token_char_data, form_char_data, token_form_char_data)
             tensor_data_file_path = data_path / f'{part}_{type(xtokenizer).__name__}_data.pt'
             logging.info(f'saving tensor data to file {tensor_data_file_path}')
             torch.save(tensor_dataset, tensor_data_file_path)
@@ -118,6 +119,36 @@ def to_form_list(df):
     return [form for form in df['form'].tolist()]
 
 
+def print_eval_scores(truth_df, decoded_df, step):
+    if len(truth_df['sent_id'].unique()) != len(decoded_df['sent_id'].unique()):
+        truth_df = truth_df.loc[truth_df['sent_id'].isin(decoded_df.sent_id.unique().tolist())]
+    aligned_scores = tb.seg_eval(truth_df, decoded_df, False)
+    mset_scores = tb.seg_eval(truth_df, decoded_df, True)
+    print(f'eval {step} aligned: [P: {aligned_scores[0]}, R: {aligned_scores[1]}, F: {aligned_scores[2]}]')
+    print(f'eval {step} mset   : [P: {mset_scores[0]}, R: {mset_scores[1]}, F: {mset_scores[2]}]')
+
+
+def print_form_sample(df):
+    gb = list(df.groupby('sent_id'))
+    forms = to_form_list(gb[-1][1])
+    print(' '.join(forms))
+
+
+def decode(labels, num_tokens, max_form_len, char_vocab):
+    labels = labels[:, :num_tokens * max_form_len]
+    mask = []
+    is_eos = False
+    eos_char = char_vocab['char2index']['</s>']
+    for i, label in enumerate(labels[0]):
+        if i % max_form_len == 0:
+            is_eos = False
+        mask.append(is_eos)
+        if labels[:, i] == eos_char:
+            is_eos = True
+    labels = labels[:, [not elem for elem in mask]]
+    return labels
+
+
 def process(epoch, phase, print_every, model, data, raw_truth_data, teacher_forcing_ratio, optimizer=None):
     print_loss, total_loss = 0, 0
     print_data, total_data = [], []
@@ -127,14 +158,21 @@ def process(epoch, phase, print_every, model, data, raw_truth_data, teacher_forc
         input_xtokens = batch[0][:, :, 1]
         input_mask = input_xtokens != model.xtokenizer.pad_token_id
         input_token_chars = batch[1][:, :, 1:]
-        output_chars = batch[2][:, :, 1]
-        output_mask = output_chars != model.char_vocab['char2index']['<pad>']
+        # output_sent_chars = batch[2][:, :, 1]
+        output_token_chars = batch[3][:, :, 1]
+        max_num_tokens = batch[3][:, :, 2].unique().item()
+        max_form_len = batch[3][:, :, 3].unique().item()
+        # output_mask = output_token_chars != model.char_vocab['char2index']['<pad>']
         use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-        model_scores = model(input_xtokens, input_mask, input_token_chars, output_chars, use_teacher_forcing)
+        model_scores = model(input_xtokens, input_mask, input_token_chars, output_token_chars, max_num_tokens,
+                             max_form_len, use_teacher_forcing)
+        num_tokens = input_token_chars[:, : 1].max()
         decoded_chars = model.decode(model_scores)
+        decoded_chars = decode(decoded_chars, num_tokens, max_form_len, model.char_vocab)
         decoded_form_chars = to_token_chars(decoded_chars, model.char_vocab)
-        print_data.append((input_sent_ids.cpu().numpy(), input_token_chars.cpu().numpy(), decoded_form_chars.cpu().numpy()))
-        batch_loss = model.loss(model_scores, output_chars, output_mask)
+        print_data.append((input_sent_ids.cpu().numpy(), input_token_chars.cpu().numpy(),
+                           decoded_form_chars.cpu().numpy()))
+        batch_loss = model.loss(model_scores, output_token_chars)
         print_loss += batch_loss
         if optimizer is not None:
             batch_loss.backward()
@@ -142,15 +180,9 @@ def process(epoch, phase, print_every, model, data, raw_truth_data, teacher_forc
             optimizer.zero_grad()
         if (i + 1) % print_every == 0:
             print(f'epoch {epoch} {phase}, step {i + 1} loss: {print_loss / len(print_data)}')
-            raw_decoded_print_data = dataset.to_raw_data(print_data, model.char_vocab)
-            raw_truth_print_data = dataset.intersect_truth_data(raw_truth_data, raw_decoded_print_data)
-            aligned_precision, aligned_recall, aligned_f1 = tb.seg_eval(raw_truth_print_data, raw_decoded_print_data, False)
-            mset_precision, mset_recall, mset_f1 = tb.seg_eval(raw_truth_print_data, raw_decoded_print_data, True)
-            print(f'aligned: P: {aligned_precision}, R: {aligned_recall}, F: {aligned_f1}')
-            print(f'mset: P: {mset_precision}, R: {mset_recall}, F: {mset_f1}')
-            gb = list(raw_decoded_print_data.groupby('sent_id'))
-            forms = to_form_list(gb[-1][1])
-            print(' '.join(forms))
+            raw_decoded_data = dataset.to_raw_data(print_data, model.char_vocab)
+            print_eval_scores(raw_truth_data, raw_decoded_data, i+1)
+            print_form_sample(raw_decoded_data)
             total_loss += print_loss
             total_data.extend(print_data)
             print_loss, print_data = 0, []
@@ -159,10 +191,7 @@ def process(epoch, phase, print_every, model, data, raw_truth_data, teacher_forc
         total_data.extend(print_data)
     print(f'epoch {epoch} {phase}, total loss: {total_loss / len(total_data)}')
     raw_decoded_data = dataset.to_raw_data(total_data, model.char_vocab)
-    aligned_precision, aligned_recall, aligned_f1 = tb.seg_eval(raw_truth_data, raw_decoded_data, False)
-    mset_precision, mset_recall, mset_f1 = tb.seg_eval(raw_truth_data, raw_decoded_data, True)
-    print(f'total aligned: P: {aligned_precision}, R: {aligned_recall}, F: {aligned_f1}')
-    print(f'total mset: P: {mset_precision}, R: {mset_recall}, F: {mset_f1}')
+    print_eval_scores(raw_truth_data, raw_decoded_data, 'total')
     return raw_decoded_data
 
 

@@ -10,6 +10,7 @@ class Model(nn.Module):
         self.xtokenizer = xtokenizer
         self.char_emb = char_emb
         self.char_vocab = char_vocab
+        self.pad_index = char_vocab['char2index']['<pad>']
         self.enc_input_size = self.char_emb.embedding_dim
         self.enc_hidden_size = self.xmodel.config.hidden_size
         self.enc_num_layers = enc_num_layers
@@ -32,9 +33,9 @@ class Model(nn.Module):
                               batch_first=True,
                               dropout=self.dec_dropout)
         self.out = nn.Linear(in_features=self.dec_hidden_size, out_features=self.out_size)
-        self.loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=0)
+        self.loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=self.pad_index)
 
-    def forward(self, in_xtokens, in_mask, in_sent_token_chars, out_chars, use_teacher_forcing):
+    def forward(self, in_xtokens, in_mask, in_sent_token_chars, out_chars, max_tokens, max_form_len, use_teacher_forcing):
         dec_scores = []
         token_ctx, sent_ctx = self.xmodel(in_xtokens, attention_mask=in_mask)
         cur_token_id = 1
@@ -47,21 +48,35 @@ class Model(nn.Module):
             enc_output, enc_state = self.encoder(emb_chars, enc_state)
             dec_state = enc_state
             dec_char = out_chars[:, 0]
-            while torch.any(torch.ne(dec_char, self.char_vocab['char2index']['</s>'])):
+            dec_token_scores = []
+            while len(dec_token_scores) < max_form_len and torch.any(torch.ne(dec_char,
+                                                                              self.char_vocab['char2index']['</s>'])):
                 emb_dec_char = self.char_emb(dec_char).unsqueeze(1)
                 dec_output, dec_state = self.decoder(emb_dec_char, dec_state)
                 dec_output = self.out(dec_output)
-                dec_scores.append(dec_output)
+                dec_token_scores.append(dec_output)
+                gold_char = out_chars[:, len(dec_scores) + len(dec_token_scores)]
                 if use_teacher_forcing:
-                    dec_char = out_chars[:, len(dec_scores)]
+                    dec_char = gold_char
                 else:
                     dec_char = self.decode(dec_output).squeeze(0)
+            pad_scores = dec_token_scores[-1]
+            while len(dec_token_scores) < max_form_len:
+                dec_token_scores.append(pad_scores)
+            dec_scores.extend(dec_token_scores)
             cur_token_id += 1
             token_chars = in_sent_token_chars[in_sent_token_chars[:, :, 0] == cur_token_id]
+        while cur_token_id <= max_tokens:
+            pad_scores = dec_scores[-1]
+            dec_token_scores = []
+            while len(dec_token_scores) < max_form_len:
+                dec_token_scores.append(pad_scores)
+            dec_scores.extend(dec_token_scores)
+            cur_token_id += 1
         return torch.cat(dec_scores, dim=1)
 
-    def loss(self, dec_scores, gold_chars, gold_mask):
-        return self.loss_fct(dec_scores[0], gold_chars[gold_mask][1:])
+    def loss(self, dec_scores, gold_chars):
+        return self.loss_fct(dec_scores[0], gold_chars[0, 1:])
 
     def decode(self, label_scores):
         return torch.argmax(label_scores, dim=2)
