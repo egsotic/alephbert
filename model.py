@@ -1,150 +1,99 @@
 import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn.functional as F
 import torch
 
 
-# class TokenCharEmbedding(nn.Module):
-#
-#     def __init__(self, token_emb, char_emb):
-#         super(TokenCharEmbedding, self).__init__()
-#         self.token_emb = token_emb
-#         self.token_dropout = nn.Dropout(0.1)
-#         self.char_emb = char_emb
-#         self.char_lstm = nn.LSTM(input_size=self.char_emb.embedding_dim, hidden_size=50, batch_first=True)
-#
-#     def forward(self, token_chars, token_char_lengths):
-#         batch_size = token_chars.shape[0]
-#         token_seq_length = token_chars.shape[1]
-#         char_seq_length = token_chars.shape[2]
-#         token_seq = token_chars[:, :, 0, 0]
-#         char_seq = token_chars[:, :, :, 1]
-#         char_lengths = token_char_lengths[:, :, 1]
-#         embed_chars = self.char_emb(char_seq)
-#         char_inputs = embed_chars.view(batch_size * token_seq_length, char_seq_length, -1)
-#         char_outputs, char_hidden_state = self.char_lstm(char_inputs)
-#         char_outputs = char_outputs[torch.arange(char_outputs.shape[0]), char_lengths.view(-1) - 1]
-#         char_outputs = char_outputs.view(batch_size, token_seq_length, -1)
-#         embed_tokens = self.token_emb(token_seq)
-#         embed_tokens = self.token_dropout(embed_tokens)
-#         embed_tokens = torch.cat((embed_tokens, char_outputs), dim=2)
-#         return embed_tokens
-#
-#     @property
-#     def embedding_dim(self):
-#         return self.token_emb.embedding_dim + self.char_lstm.hidden_size
+class TokenSeq2SeqMorphSeg(nn.Module):
 
-
-class TokenCharEmbedding(nn.Module):
-
-    def __init__(self, char_emb, token_emb_dim=0):
-        super(TokenCharEmbedding, self).__init__()
-        self.char_emb = char_emb
-        self.input_dim = char_emb.embedding_dim + token_emb_dim
-        self.char_rnn = nn.LSTM(input_size=self.input_dim, hidden_size=50, batch_first=True,
-                                bidirectional=False, num_layers=1, dropout=0.0)
-
-    def forward(self, chars, embedded_token=None):
-        embed_chars = self.emb(chars.view(1, -1))
-        if embedded_token:
-            embed_chars = torch.cat((embed_chars, embedded_token), dim=0)
-        char_outputs, char_hidden_state = self.rnn(embed_chars)
-        return char_outputs
-
-    @property
-    def embedding_dim(self):
-        return self.char_rnn.hidden_size
-
-
-class Attention(nn.Module):
-
-    def __init__(self, hidden_size, vocab_size, max_seq_len):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.vocab_size = vocab_size
-        self.attn = nn.Linear(hidden_size, max_seq_len)
-        self.attn_combine = nn.Linear(hidden_size, hidden_size)
-
-    def forward(self, embedded, hidden, enc_outputs):
-        attn_weights = F.softmax(self.attn(torch.cat((embedded, hidden), dim=1)), dim=1)
-        attn_weights = attn_weights[:, :enc_outputs.shape[1]]
-        attn_applied = torch.bmm(attn_weights.unsqueeze(1), enc_outputs)
-        output = torch.cat((embedded.unsqueeze(1), attn_applied), 2)
-        return self.attn_combine(output)
-
-
-class Decoder(nn.Module):
-    def __init__(self, emb, hidden_size, vocab_size):
-        super().__init__()
-        self.embedding = emb
-        self.hidden_size = hidden_size
-        self.vocab_size = vocab_size
-        self.gru = nn.GRU(input_size=emb.embedding_dim, hidden_size=hidden_size,
-                          num_layers=1, batch_first=True, dropout=0.0, bidirectional=False)
-        self.out = nn.Linear(in_features=hidden_size, out_features=vocab_size)
-
-    def forward(self, seg_input, hidden_state):
-        output = self.embedding(seg_input).view(1, 1, -1)
-        output = F.relu(output)
-        output, hidden_state = self.gru(output, hidden_state)
-        output = self.out(output)
-        return output, hidden_state
-
-
-class AttnDecoder(nn.Module):
-    def __init__(self, char_emb, input_size, hidden_size, vocab_size, attn):
+    def __init__(self, char_emb, enc_hidden_size, enc_num_layers, enc_dropout, dec_num_layers, dec_dropout, out_size):
         super().__init__()
         self.char_emb = char_emb
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.vocab_size = vocab_size
-        self.gru = nn.GRU(input_size=input_size, hidden_size=hidden_size,
-                          num_layers=1, batch_first=True, dropout=0.0, bidirectional=False)
-        self.out = nn.Linear(in_features=hidden_size, out_features=vocab_size)
-        self.attn = attn
+        self.enc_input_size = self.char_emb.embedding_dim
+        self.enc_hidden_size = enc_hidden_size
+        self.enc_num_layers = enc_num_layers
+        self.enc_dropout = enc_dropout
+        self.dec_input_size = self.char_emb.embedding_dim
+        self.dec_hidden_size = self.enc_hidden_size
+        self.dec_num_layers = dec_num_layers
+        self.dec_dropout = dec_dropout
+        self.out_size = out_size
+        self.encoder = nn.GRU(input_size=self.enc_input_size,
+                              hidden_size=self.enc_hidden_size,
+                              num_layers=self.enc_num_layers,
+                              bidirectional=False,
+                              batch_first=False,
+                              dropout=self.enc_dropout)
+        self.decoder = nn.GRU(input_size=self.dec_input_size,
+                              hidden_size=self.dec_hidden_size,
+                              num_layers=self.dec_num_layers,
+                              bidirectional=False,
+                              batch_first=False,
+                              dropout=self.dec_dropout)
+        self.out = nn.Linear(in_features=self.dec_hidden_size, out_features=self.out_size)
 
-    def forward(self, emb_token, char_input, hidden_state, enc_outputs):
-        emb_char = self.char_emb(char_input)
-        output = torch.cat([emb_token, emb_char], dim=1)
-        output = F.relu(output)
-        output = self.attn(output, hidden_state.squeeze(1), enc_outputs)
-        output, hidden_state = self.gru(output, hidden_state)
-        output = self.out(output)
-        return output, hidden_state
+    def forward(self, in_token_char_seq, in_enc_state, out_char_seq, sos_char, eos_char,
+                use_teacher_forcing):
+        emb_chars = self.char_emb(in_token_char_seq).unsqueeze(1)
+        enc_output, dec_state = self.encoder(emb_chars, in_enc_state)
+        dec_char = sos_char
+        dec_char_scores = []
+        max_len = out_char_seq.shape[1]
+        while len(dec_char_scores) < max_len:
+            emb_dec_char = self.char_emb(dec_char).unsqueeze(1)
+            dec_output, dec_state = self.decoder(emb_dec_char, dec_state)
+            dec_output = self.out(dec_output)
+            if use_teacher_forcing:
+                dec_char = out_char_seq[:, len(dec_char_scores)]
+            else:
+                dec_char = self.decode(dec_output).squeeze(0)
+            dec_char_scores.append(dec_output)
+            if torch.all(torch.eq(dec_char, eos_char)):
+                break
+        fill_len = max_len - len(dec_char_scores)
+        dec_char_scores.extend([dec_char_scores[-1]] * fill_len)
+        return torch.cat(dec_char_scores, dim=1)
+
+    def decode(self, label_scores):
+        return torch.argmax(label_scores, dim=2)
 
 
-class SegModel(nn.Module):
+class MorphSegModel(nn.Module):
 
-    def __init__(self, xtokenizer, xmodel, char_vocab, decoder):
+    def __init__(self, xmodel, xtokenizer, char_emb, char_vocab, token_morph_seg):
         super().__init__()
-        self.xtokenizer = xtokenizer
         self.xmodel = xmodel
+        self.xtokenizer = xtokenizer
+        self.char_emb = char_emb
         self.char_vocab = char_vocab
-        self.decoder = decoder
-        self.loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=0)
+        self.token_morph_seg = token_morph_seg
+        self.loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=self.char_vocab['char2index']['<pad>'])
 
-    def forward(self, input_xtokens, input_mask, token_chars, output_chars):
-        enc_output, enc_hs = self.xmodel(input_xtokens, attention_mask=input_mask)
-        dec_hs = enc_hs.unsqueeze(1)
+    def forward(self, xtokens, tokens, form_chars, max_tokens, max_form_len, sos_char, eos_char, use_teacher_forcing):
         dec_scores = []
-        dec_char = output_chars[:, 0]
-        cur_token_id = 0
-        cur_token_emb = enc_output[:, 0]
-        while True:
-            dec_output, dec_hs = self.decoder(cur_token_emb, dec_char, dec_hs, enc_output)
-            if dec_char == self.char_vocab['<s>'] or dec_char == self.char_vocab['</s>']:
-                cur_token_id += 1
-                cur_token_char = token_chars[0, token_chars[0, :, 0] == cur_token_id]
-                if cur_token_char.nelement() == 0:
-                    break
-                cur_xtoken_ids = cur_token_char[:, 1].unique()
-                cur_enc_output = enc_output[:, cur_xtoken_ids - 1]
-                cur_token_emb = torch.mean(cur_enc_output, dim=1)
-            dec_scores.append(dec_output)
-            dec_char = output_chars[:, len(dec_scores)]
-        return torch.cat(dec_scores, dim=1)
+        mask = xtokens != self.xtokenizer.pad_token_id
+        token_ctx, sent_ctx = self.xmodel(xtokens, attention_mask=mask)
+        cur_token_id = 1
+        token_chars = tokens[tokens[:, :, 0] == cur_token_id]
+        while token_chars.nelement() > 0:
+            xtoken_ids = token_chars[:, 1]
+            token_state = torch.mean(token_ctx[:, xtoken_ids], dim=1).unsqueeze(1)
+            token_form_chars = form_chars[:, (cur_token_id-1)*max_form_len:cur_token_id*max_form_len]
+            char_seq = token_chars[:, 2]
+            dec_token_scores = self.token_morph_seg(char_seq, token_state, token_form_chars, sos_char, eos_char,
+                                                    use_teacher_forcing)
+            dec_scores.append(dec_token_scores)
+            cur_token_id += 1
+            token_chars = tokens[tokens[:, :, 0] == cur_token_id]
+        num_tokens = cur_token_id - 1
+        fill_len = max_tokens - num_tokens
+        dec_scores.extend([dec_scores[-1]] * fill_len)
+        return num_tokens, torch.cat(dec_scores, dim=1)
+        # dec_scores.extend([dec_scores[-1]] * fill_len)
+        # dec_scores = torch.cat(dec_scores, dim=1)
+        # return num_tokens, F.pad(input=dec_scores, pad=(0, 0, 0, fill_len, 0, 0), mode='constant', value=0)
 
-    def loss(self, dec_scores, gold_chars, gold_mask):
-        return self.loss_fct(dec_scores[0], gold_chars[gold_mask][1:])
+    def loss(self, dec_scores, gold_chars):
+        return self.loss_fct(dec_scores[0], gold_chars[0])
 
     def decode(self, label_scores):
         return torch.argmax(label_scores, dim=2)

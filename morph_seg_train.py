@@ -7,12 +7,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import AutoTokenizer, AutoModel
 # get_linear_schedule_with_warmup
-# AutoModelForMaskedLM, BertForMaskedLM, \
-# AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 import dataset
 from bclm import treebank as tb
-from model2 import Model
 from pathlib import Path
+from model import MorphSegModel, TokenSeq2SeqMorphSeg
 
 
 # Logging setup
@@ -24,15 +22,19 @@ logging.basicConfig(
 )
 
 
-def get_raw_data(annotated_tensor_data, model):
+def get_raw_data(annotated_tensor_data, char_vocab):
     seg_data = []
     for i, batch in enumerate(annotated_tensor_data):
-        sent_ids = batch[0][:, :, 0]
-        token_chars = batch[1][:, :, 1:]
-        form_chars = batch[2][:, :, 1]
-        form_chars = to_token_chars(form_chars, model.char_vocab)
-        seg_data.append((sent_ids.numpy(), token_chars.numpy(), form_chars.numpy()))
-    return dataset.to_raw_data(seg_data, model.char_vocab)
+        xtoken_data, token_char_data, form_char_data, token_form_char_data = batch
+        sent_ids = token_char_data[:, :, 0]
+        token_chars = token_char_data[:, :, [1, 3]]
+        token_form_chars = token_form_char_data[:, :, 1]
+        num_tokens = token_char_data[:, :, 1].max().item()
+        max_form_len = token_form_char_data[:, :, 3].unique().item()
+        gold_chars = decode(token_form_chars, num_tokens, max_form_len, char_vocab)
+        gold_form_chars = to_token_chars(gold_chars, char_vocab)
+        seg_data.append((sent_ids.numpy(), token_chars.numpy(), gold_form_chars.numpy()))
+    return dataset.to_raw_data(seg_data, char_vocab)
 
 
 def get_tensor_dataset(data_path, partition, xtokenizer, char_vocab):
@@ -69,15 +71,19 @@ logging.info('BERT model and tokenizer loaded')
 
 # FastText
 char_vectors, char2index = dataset.load_emb('char')
+index2char = {char2index[c]: c for c in char2index}
+char_vocab = {'char2index': char2index, 'index2char': index2char}
 logging.info('FastText char embedding vectors and vocab loaded')
 
 # Data
 # partition = tb.spmrl('data/raw')
 partition = ['train', 'dev', 'test']
-dataset_partition = get_tensor_dataset(Path('data'), partition, bert_tokenizer, char2index)
+dataset_partition = get_tensor_dataset(Path('data'), partition, bert_tokenizer, char_vocab)
 
 # Configuration
 train_batch_size = 1
+# dataset_partition['train'].tensors = [t[4400:4500] for t in dataset_partition['train'].tensors]
+# dataset_partition['dev'].tensors = [t[:100] for t in dataset_partition['dev'].tensors]
 train_dataloader = DataLoader(dataset_partition['train'], batch_size=train_batch_size, shuffle=False)
 dev_dataloader = DataLoader(dataset_partition['dev'], batch_size=1)
 test_dataloader = DataLoader(dataset_partition['test'], batch_size=1)
@@ -87,10 +93,12 @@ optim_step_every = 1
 optim_max_grad_norm = 5.0
 
 # Model
-index2char = {char2index[c]: c for c in char2index}
 char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float),
                                         freeze=False, padding_idx=char2index['<pad>'])
-seg_model = Model(bert, bert_tokenizer, char_emb, {'char2index': char2index, 'index2char': index2char}, enc_num_layers=1, enc_dropout=0.0, dec_num_layers=1, dec_dropout=0.0)
+token_morph_seg_model = TokenSeq2SeqMorphSeg(char_emb, enc_hidden_size=bert.config.hidden_size, enc_num_layers=1,
+                                             enc_dropout=0.0, dec_num_layers=1, dec_dropout=0.0,
+                                             out_size=len(char2index))
+seg_model = MorphSegModel(bert, bert_tokenizer, char_emb, char_vocab, token_morph_seg_model)
 # freeze all the parameters
 for param in bert.parameters():
     param.requires_grad = False
@@ -109,9 +117,6 @@ def to_token_chars(chars, char_vocab):
     token_chars_mask = torch.eq(chars, eos_char)
     token_ids = torch.cumsum(token_chars_mask, dim=1) + 1
     token_ids -= token_chars_mask.long()
-    num_tokens = token_ids[:, -1:]
-    token_pad_mask = torch.eq(token_ids, num_tokens)
-    token_ids[token_pad_mask] = 0
     return torch.stack([token_ids, chars], dim=2)
 
 
@@ -134,50 +139,58 @@ def print_form_sample(df):
     print(' '.join(forms))
 
 
-def decode(labels, num_tokens, max_form_len, char_vocab):
-    labels = labels[:, :num_tokens * max_form_len]
-    mask = []
-    is_eos = False
+def decode(input_labels, num_tokens, max_form_len, char_vocab):
+    input_labels = input_labels[:, :num_tokens * max_form_len]
+    is_eos = True
     eos_char = char_vocab['char2index']['</s>']
-    for i, label in enumerate(labels[0]):
+    output_labels = []
+    tokens = 0
+    for i, label in enumerate(input_labels[0]):
+        label = label.item()
+        if i % max_form_len == (max_form_len - 1):
+            label = eos_char
         if i % max_form_len == 0:
             is_eos = False
-        mask.append(is_eos)
-        if labels[:, i] == eos_char:
+        if not is_eos:
+            output_labels.append(label)
+            if label == eos_char:
+                tokens += 1
+        if label == eos_char:
             is_eos = True
-    labels = labels[:, [not elem for elem in mask]]
+    labels = torch.tensor([output_labels], dtype=torch.long)
     return labels
 
 
 def process(epoch, phase, print_every, model, data, raw_truth_data, teacher_forcing_ratio, optimizer=None):
     print_loss, total_loss = 0, 0
     print_data, total_data = [], []
+    sos_char = torch.tensor([char2index['<s>']], dtype=torch.long, device=device)
+    eos_char = torch.tensor([char2index['</s>']], dtype=torch.long, device=device)
     for i, batch in enumerate(data):
         batch = tuple(t.to(device) for t in batch)
-        input_sent_ids = batch[0][:, :, 0]
-        input_xtokens = batch[0][:, :, 1]
-        input_mask = input_xtokens != model.xtokenizer.pad_token_id
-        input_token_chars = batch[1][:, :, 1:]
-        # output_sent_chars = batch[2][:, :, 1]
-        output_token_chars = batch[3][:, :, 1]
-        max_num_tokens = batch[3][:, :, 2].unique().item()
-        max_form_len = batch[3][:, :, 3].unique().item()
-        # output_mask = output_token_chars != model.char_vocab['char2index']['<pad>']
+        xtoken_data, token_char_data, form_char_data, token_form_char_data = batch
+        xtokens = xtoken_data[:, :, 1]
+        sent_ids = token_char_data[:, :, 0]
+        token_chars = token_char_data[:, :, 1:]
+        token_form_chars = token_form_char_data[:, :, 1]
+        max_num_tokens = token_form_char_data[:, :, 2].unique().item()
+        max_form_len = token_form_char_data[:, :, 3].unique().item()
         use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-        model_scores = model(input_xtokens, input_mask, input_token_chars, output_token_chars, max_num_tokens,
-                             max_form_len, use_teacher_forcing)
-        num_tokens = input_token_chars[:, : 1].max()
-        decoded_chars = model.decode(model_scores)
-        decoded_chars = decode(decoded_chars, num_tokens, max_form_len, model.char_vocab)
-        decoded_form_chars = to_token_chars(decoded_chars, model.char_vocab)
-        print_data.append((input_sent_ids.cpu().numpy(), input_token_chars.cpu().numpy(),
-                           decoded_form_chars.cpu().numpy()))
-        batch_loss = model.loss(model_scores, output_token_chars)
+        num_tokens, decoded_char_scores = model(xtokens, token_chars, token_form_chars, max_num_tokens, max_form_len,
+                                                sos_char, eos_char, use_teacher_forcing)
+        batch_loss = model.loss(decoded_char_scores, token_form_chars)
         print_loss += batch_loss
         if optimizer is not None:
             batch_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+        # gold_chars = decode(token_form_chars, num_tokens, max_form_len, model.char_vocab)
+        # gold_form_chars = to_token_chars(gold_chars, model.char_vocab)
+        decoded_chars = model.decode(decoded_char_scores)
+        decoded_chars = decode(decoded_chars, num_tokens, max_form_len, model.char_vocab)
+        decoded_form_chars = to_token_chars(decoded_chars, model.char_vocab)
+        token_chars = token_chars[:, :, [0, 2]]
+        print_data.append((sent_ids.cpu().numpy(), token_chars.cpu().numpy(), decoded_form_chars.cpu().numpy()))
         if (i + 1) % print_every == 0:
             print(f'epoch {epoch} {phase}, step {i + 1} loss: {print_loss / len(print_data)}')
             raw_decoded_data = dataset.to_raw_data(print_data, model.char_vocab)
@@ -195,16 +208,16 @@ def process(epoch, phase, print_every, model, data, raw_truth_data, teacher_forc
     return raw_decoded_data
 
 
-raw_train_data = get_raw_data(train_dataloader, seg_model)
-raw_dev_data = get_raw_data(dev_dataloader, seg_model)
+raw_train_data = get_raw_data(train_dataloader, char_vocab)
+raw_dev_data = get_raw_data(dev_dataloader, char_vocab)
 
 device = None
 if device is not None:
     seg_model.to(device)
 print(seg_model)
 teacher_forcing_ratio = 1.0
-epochs = 1
-total_train_steps = (len(train_dataloader.dataset) // train_batch_size // optim_step_every // epochs)
+epochs = 3
+# total_train_steps = (len(train_dataloader.dataset) // train_batch_size // optim_step_every // epochs)
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
     seg_model.train()

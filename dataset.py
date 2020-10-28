@@ -1,4 +1,3 @@
-import itertools
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -178,11 +177,11 @@ class ProcessedDataSamples:
             sample_token_ids = sample_token_ids.tolist()
             for pos in token_pos:
                 sample_chars[pos] = '</s>'
-            sample_chars.insert(0, '<s>')
-            sample_tokens.insert(0, '<s>')
-            sample_token_ids.insert(0, 0)
-            sample_forms.insert(0, '<s>')
-            sample_form_ids.insert(0, 0)
+            # sample_chars.insert(0, '<s>')
+            # sample_tokens.insert(0, '<s>')
+            # sample_token_ids.insert(0, 0)
+            # sample_forms.insert(0, '<s>')
+            # sample_form_ids.insert(0, 0)
             sample_chars.append('</s>')
             sample_tokens.append('</s>')
             sample_token_ids.append(sample_token_ids[-1])
@@ -367,7 +366,7 @@ def load_data(partition, xtokenizer, char_vocab):
         token_char_file = Path('data') / f'{part}_{type(xtokenizer).__name__}_token_char.csv'
         logging.info(f'loading {token_char_file}')
         token_char_data = pd.read_csv(str(token_char_file), index_col=0)
-        token_char_data['char'] = token_char_data['char'].apply(lambda x: char_vocab[x])
+        token_char_data['char'] = token_char_data['char'].apply(lambda x: char_vocab['char2index'][x])
         token_char_data['xtoken'] = token_char_data['xtoken'].apply(lambda x: xtokenizer.convert_tokens_to_ids(x))
         token_char_data = token_char_data[['sent_id', 'token_id', 'xtoken_id', 'char']]
         token_char_groups = token_char_data.groupby('sent_id')
@@ -377,7 +376,7 @@ def load_data(partition, xtokenizer, char_vocab):
         form_char_file = Path('data') / f'{part}_{type(xtokenizer).__name__}_form_char.csv'
         logging.info(f'loading {form_char_file}')
         form_char_data = pd.read_csv(str(form_char_file), index_col=0)
-        form_char_data['char'] = form_char_data['char'].apply(lambda x: char_vocab[x])
+        form_char_data['char'] = form_char_data['char'].apply(lambda x: char_vocab['char2index'][x])
         form_char_data = form_char_data[['sent_id', 'char']]
         form_char_groups = form_char_data.groupby('sent_id')
         # logging.info(f'{part} form char samples # = {len(form_char_groups)}')
@@ -386,7 +385,7 @@ def load_data(partition, xtokenizer, char_vocab):
         token_form_char_file = Path('data') / f'{part}_{type(xtokenizer).__name__}_token_form_char.csv'
         logging.info(f'loading {token_form_char_file}')
         token_form_char_data = pd.read_csv(str(token_form_char_file), index_col=0)
-        token_form_char_data['char'] = token_form_char_data['char'].apply(lambda x: char_vocab[x])
+        token_form_char_data['char'] = token_form_char_data['char'].apply(lambda x: char_vocab['char2index'][x])
         token_form_char_data = token_form_char_data[['sent_id', 'char', 'max_num_tokens', 'max_form_len']]
         token_form_char_groups = token_form_char_data.groupby(['sent_id'])
         # logging.info(f'{part} token form char samples # = {len(token_form_char_groups)}')
@@ -399,17 +398,18 @@ def load_data(partition, xtokenizer, char_vocab):
 def _to_segmented_rows(input_token_chars, sent_form_chars, char_vocab):
     sep_char = char_vocab['char2index']['<sep>']
     token_ids = sent_form_chars[:, :, 0]
-    token_ids = token_ids[token_ids != 0]
-    num_tokens = 0 if len(token_ids) == 0 else token_ids[-1]
+    # token_ids = token_ids[token_ids != 0]
+    num_tokens = token_ids[:, -1].item()
     rows = []
     for token_id in range(1, num_tokens+1):
-        tokens = input_token_chars[:, :][input_token_chars[:, :, 0] == token_id]
-        token_chars = tokens[:, 2]
+        tokens = input_token_chars[input_token_chars[:, :, 0] == token_id]
+        token_chars = tokens[:, 1]
         chars = [char_vocab['index2char'][c] for c in token_chars]
         token = ''.join(chars)
-        segments = sent_form_chars[:, :][sent_form_chars[:, :, 0] == token_id]
+        segments = sent_form_chars[sent_form_chars[:, :, 0] == token_id]
         segments_chars = segments[:, 1]
-        chars = [' ' if c == sep_char else char_vocab['index2char'][c] for c in segments_chars[:-1]]
+        chars = [' ' if c == sep_char else char_vocab['index2char'][c] for c in segments_chars
+                 if c != char_vocab['char2index']['</s>']]
         rows.extend([(token_id, token, seg) for seg in ''.join(chars).split(' ')])
     return rows
 
