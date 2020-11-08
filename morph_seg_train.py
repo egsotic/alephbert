@@ -13,15 +13,6 @@ from model import MorphSegModel, TokenSeq2SeqMorphSeg
 # from sklearn.metrics import accuracy_score, f1_score
 
 
-# Logging setup
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-    datefmt="%m/%d/%Y %H:%M:%S",
-    level=logging.INFO
-)
-
-
 def get_raw_data(annotated_tensor_data, char_vocab):
     target_data = []
     for i, batch in enumerate(annotated_tensor_data):
@@ -60,47 +51,6 @@ def get_tensor_dataset(data_path, partition, xtokenizer, char_vocab):
             torch.save(tensor_dataset, tensor_data_file_path)
             tensor_data[part] = tensor_dataset
     return tensor_data
-
-
-# BERT Language Model
-bert_folder_path = Path('./experiments/transformers/bert-wordpiece-v1')
-logging.info(f'BERT folder path: {str(bert_folder_path)}')
-bert = AutoModel.from_pretrained(str(bert_folder_path))
-bert_tokenizer = AutoTokenizer.from_pretrained(str(bert_folder_path))
-logging.info('BERT model and tokenizer loaded')
-
-# FastText
-char_vectors, char2index = dataset.load_emb('char')
-index2char = {char2index[c]: c for c in char2index}
-char_vocab = {'char2index': char2index, 'index2char': index2char}
-logging.info('FastText char embedding vectors and vocab loaded')
-
-# Data
-# partition = tb.spmrl('data/raw')
-partition = ['train', 'dev', 'test']
-dataset_partition = get_tensor_dataset(Path('data'), partition, bert_tokenizer, char_vocab)
-
-# Configuration
-train_batch_size = 1
-# dataset_partition['train'].tensors = [t[4400:4500] for t in dataset_partition['train'].tensors]
-# dataset_partition['dev'].tensors = [t[:100] for t in dataset_partition['dev'].tensors]
-train_dataloader = DataLoader(dataset_partition['train'], batch_size=train_batch_size, shuffle=False)
-dev_dataloader = DataLoader(dataset_partition['dev'], batch_size=1)
-test_dataloader = DataLoader(dataset_partition['test'], batch_size=1)
-
-# Model
-char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float),
-                                        freeze=False, padding_idx=char2index['<pad>'])
-num_layers = 2
-hidden_size = bert.config.hidden_size // num_layers
-enc_dropout = 0.1
-dec_dropout = 0.1
-out_size = len(char2index)
-out_dropout = 0.3
-token_morph_seg_model = TokenSeq2SeqMorphSeg(char_emb, hidden_size=hidden_size, num_layers=num_layers,
-                                             enc_dropout=enc_dropout, dec_dropout=dec_dropout, out_size=out_size,
-                                             out_dropout=out_dropout)
-seg_model = MorphSegModel(bert, bert_tokenizer, char_emb, token_morph_seg_model)
 
 
 def to_token_chars(chars, char_vocab):
@@ -172,9 +122,9 @@ def process(epoch, phase, print_every, model, data, target_raw_data, teacher_for
         if use_teacher_forcing:
             num_tokens, char_scores = model(xtokens, input_token_chars, sos, eos, max_form_len, target_chars)
         else:
-            num_tokens, char_scores = model(xtokens, input_token_chars, sos, eos, max_form_len)
+            num_tokens, char_scores = model(xtokens, input_token_chars, sos, eos, max_form_len, None)
         target_chars = target_chars[:, :num_tokens * max_form_len]
-        batch_loss = criterion(char_scores[0], target_chars[0])
+        batch_loss = criterion(model.loss_prepare(char_scores, target_chars))
         print_loss += batch_loss
         if optimizer is not None:
             batch_loss.backward()
@@ -196,7 +146,7 @@ def process(epoch, phase, print_every, model, data, target_raw_data, teacher_for
         print_data.append((sent_ids.cpu().numpy(), token_chars.cpu().numpy(), predicted_form_chars.cpu().numpy()))
         if (i + 1) % print_every == 0:
             print(f'epoch {epoch} {phase}, step {i + 1} loss: {print_loss / len(print_data)}')
-            print(f'optimizer.lr = {optimizer.param_groups[0]["lr"]}')
+            # print(f'optimizer.lr = {optimizer.param_groups[0]["lr"]}')
             # print(f'epoch {epoch} {phase}, step {i + 1} acc: {print_acc / len(print_data)}')
             predicted_raw_data = dataset.to_raw_data(print_data, char_vocab)
             print_eval_scores(target_raw_data, predicted_raw_data, i+1)
@@ -215,14 +165,59 @@ def process(epoch, phase, print_every, model, data, target_raw_data, teacher_for
     return predicted_raw_data
 
 
+# Logging setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.INFO
+)
+
+# BERT Language Model
+bert_folder_path = Path('./experiments/transformers/bert-wordpiece-v1')
+logging.info(f'BERT folder path: {str(bert_folder_path)}')
+bert = AutoModel.from_pretrained(str(bert_folder_path))
+bert_tokenizer = AutoTokenizer.from_pretrained(str(bert_folder_path))
+logging.info('BERT model and tokenizer loaded')
+
+# FastText
+char_vectors, char2index = dataset.load_emb('char')
+index2char = {char2index[c]: c for c in char2index}
+char_vocab = {'char2index': char2index, 'index2char': index2char}
+logging.info('FastText char embedding vectors and vocab loaded')
+
+# Data
+# partition = tb.spmrl('data/raw')
+partition = ['train', 'dev', 'test']
+dataset_partition = get_tensor_dataset(Path('data'), partition, bert_tokenizer, char_vocab)
+
+train_batch_size = 1
+# dataset_partition['train'].tensors = [t[4400:4500] for t in dataset_partition['train'].tensors]
+# dataset_partition['dev'].tensors = [t[:100] for t in dataset_partition['dev'].tensors]
+train_dataloader = DataLoader(dataset_partition['train'], batch_size=train_batch_size, shuffle=False)
+dev_dataloader = DataLoader(dataset_partition['dev'], batch_size=1)
+test_dataloader = DataLoader(dataset_partition['test'], batch_size=1)
+
 raw_train_data = get_raw_data(train_dataloader, char_vocab)
 raw_dev_data = get_raw_data(dev_dataloader, char_vocab)
 
+# Model
+char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float),
+                                        freeze=False, padding_idx=char2index['<pad>'])
+num_layers = 2
+hidden_size = bert.config.hidden_size // num_layers
+enc_dropout = 0.1
+dec_dropout = 0.1
+out_size = len(char2index)
+out_dropout = 0.3
+token_morph_seg_model = TokenSeq2SeqMorphSeg(char_emb, hidden_size=hidden_size, num_layers=num_layers,
+                                             enc_dropout=enc_dropout, dec_dropout=dec_dropout, out_size=out_size,
+                                             out_dropout=out_dropout)
+seg_model = MorphSegModel(bert, bert_tokenizer, char_emb, token_morph_seg_model)
 device = None
 if device is not None:
     seg_model.to(device)
 print(seg_model)
-
 
 epochs = 3
 lr = 1e-3
