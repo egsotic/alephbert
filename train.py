@@ -80,9 +80,9 @@ else:
     save_tensors(dataset_partition, bert_tokenizer, data_path)
 
 train_batch_size = 1
-dataset_partition['train'].tensors = [t[:100] for t in dataset_partition['train'].tensors]
-dataset_partition['dev'].tensors = [t[:100] for t in dataset_partition['dev'].tensors]
-dataset_partition['test'].tensors = [t[:100] for t in dataset_partition['test'].tensors]
+# dataset_partition['train'].tensors = [t[:100] for t in dataset_partition['train'].tensors]
+# dataset_partition['dev'].tensors = [t[:100] for t in dataset_partition['dev'].tensors]
+# dataset_partition['test'].tensors = [t[:100] for t in dataset_partition['test'].tensors]
 train_dataloader = DataLoader(dataset_partition['train'], batch_size=train_batch_size, shuffle=False)
 dev_dataloader = DataLoader(dataset_partition['dev'], batch_size=1)
 test_dataloader = DataLoader(dataset_partition['test'], batch_size=1)
@@ -97,8 +97,11 @@ def to_raw_data(data, char_vocab, tag_vocab, feats_vocab):
     return raw_data
 
 
-def to_dataframe(raw_data_list, columns):
-    return pd.DataFrame(list(itertools.chain.from_iterable(raw_data_list)), columns=columns)
+# def to_dataframe(raw_data_list, columns):
+#     return pd.DataFrame(list(itertools.chain.from_iterable(raw_data_list)), columns=columns)
+def to_dataset(data_samples):
+    columns = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
+    return pd.DataFrame([row for sample in data_samples for row in sample], columns=columns)
 
 
 data_path = Path('data')
@@ -117,10 +120,10 @@ else:
     raw_train_path = data_path / f'train_{type(bert_tokenizer).__name__}_raw_data.csv'
     raw_dev_path = data_path / f'dev_{type(bert_tokenizer).__name__}_raw_data.csv'
     raw_test_path = data_path / f'test_{type(bert_tokenizer).__name__}_raw_data.csv'
-    columns = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
-    raw_train_data = to_dataframe(raw_train_data, columns)
-    raw_dev_data = to_dataframe(raw_dev_data, columns)
-    raw_test_data = to_dataframe(raw_test_data, columns)
+    # columns = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
+    raw_train_data = to_dataset(raw_train_data)
+    raw_dev_data = to_dataset(raw_dev_data)
+    raw_test_data = to_dataset(raw_test_data)
     raw_train_data.to_csv(raw_train_path, index=False)
     raw_dev_data.to_csv(raw_dev_path, index=False)
     raw_test_data.to_csv(raw_test_path, index=False)
@@ -169,7 +172,7 @@ lr_scheduler = get_linear_schedule_with_warmup(adam, num_warmup_steps=scheduler_
 # optimizer = ModelOptimizer(parameters, optimizer, optim_step_every, optim_max_grad_norm, lr_scheduler)
 
 
-def to_packed_form_char_data(form_chars, max_form_len, max_tag_len, eos, sep):
+def _to_packed_form_char_data(form_chars, max_form_len, max_tag_len, eos, sep):
     form_chars = torch.split(form_chars, max_form_len, dim=1)
     token_mask = [torch.eq(c, eos) for c in form_chars]
     form_mask = [torch.eq(c, sep) for c in form_chars]
@@ -197,7 +200,7 @@ def to_packed_form_char_data(form_chars, max_form_len, max_tag_len, eos, sep):
     return data
 
 
-def to_packed_lemma_char_data(form_char_data, char_vocab):
+def _to_packed_lemma_char_data(form_char_data, char_vocab):
     morph_ids = [fcd[:, 1].unique() for fcd in form_char_data]
     lemma_len = [len(mid) for mid in morph_ids]
     token_ids = [torch.tensor(tid + 1, dtype=torch.long).repeat(tl) for tid, tl in enumerate(lemma_len)]
@@ -206,7 +209,7 @@ def to_packed_lemma_char_data(form_char_data, char_vocab):
     return data
 
 
-def to_packed_morph_data(form_char_data, tags, max_tag_len, feats_vocab):
+def _to_packed_morph_data(form_char_data, tags, max_tag_len, feats_vocab):
     tags = torch.split(tags, max_tag_len, dim=1)
     morph_ids = [fcd[:, 1].unique() for fcd in form_char_data]
     tag_len = [len(mid) for mid in morph_ids]
@@ -222,7 +225,7 @@ def to_packed_morph_data(form_char_data, tags, max_tag_len, feats_vocab):
     return data
 
 
-def to_padded_char_data(packed_char_data, sent_id):
+def _to_char_data_sample(packed_char_data, sent_id):
     packed_token_ids = [fcd[:, 0].unique().item() for fcd in packed_char_data]
     packed_len = [len(fcd) for fcd in packed_char_data]
     padded_data = torch.nn.utils.rnn.pad_sequence(packed_char_data, batch_first=True, padding_value=0)
@@ -243,7 +246,7 @@ def to_padded_char_data(packed_char_data, sent_id):
     return data.view(1, -1, data.shape[-1])
 
 
-def to_padded_morph_data(packed_morph_data, sent_id):
+def _to_morph_data_sample(packed_morph_data, sent_id):
     packed_token_ids = [fcd[:, 0].unique().item() for fcd in packed_morph_data]
     packed_len = [len(fcd) for fcd in packed_morph_data]
     padded_data = torch.nn.utils.rnn.pad_sequence(packed_morph_data, batch_first=True, padding_value=0)
@@ -265,37 +268,53 @@ def to_padded_morph_data(packed_morph_data, sent_id):
     return data.view(1, -1, data.shape[-1])
 
 
-def to_annotated_data(token_char_data, form_chars, max_form_len, tags, max_tags_len, eos, sep):
-    packed_form_char_data = to_packed_form_char_data(form_chars, max_form_len, max_tags_len, eos, sep)
-    packed_lemma_char_data = to_packed_lemma_char_data(packed_form_char_data, char_vocab)
-    packed_morph_data = to_packed_morph_data(packed_form_char_data, tags, max_tags_len, feats_vocab)
+def to_data_sample(token_char_data, form_chars, max_form_len, tags, max_tags_len, eos, sep):
+    packed_form_char_data =_to_packed_form_char_data(form_chars, max_form_len, max_tags_len, eos, sep)
+    packed_lemma_char_data = _to_packed_lemma_char_data(packed_form_char_data, char_vocab)
+    packed_morph_data = _to_packed_morph_data(packed_form_char_data, tags, max_tags_len, feats_vocab)
     sent_id = token_char_data[:, 0, 0]
-    form_char_data = to_padded_char_data(packed_form_char_data, sent_id)
-    lemma_char_data = to_padded_char_data(packed_lemma_char_data, sent_id)
-    morph_data = to_padded_morph_data(packed_morph_data, sent_id)
+    form_char_data = _to_char_data_sample(packed_form_char_data, sent_id)
+    lemma_char_data = _to_char_data_sample(packed_lemma_char_data, sent_id)
+    morph_data = _to_morph_data_sample(packed_morph_data, sent_id)
     return token_char_data.numpy(), form_char_data.numpy(), lemma_char_data.numpy(), morph_data.numpy()
 
 
-def print_sample(raw_data):
-    columns = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
-    df = pd.DataFrame(raw_data, columns=columns)
+def print_sample(sample_data):
+    df = to_dataset([sample_data])
     sample = [str((s[1][0], s[1][1])) for s in df[['form', 'tag']].iterrows()]
     print(' '.join(sample))
+
+
+# def to_dataset(data_samples):
+#     columns = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
+#     return pd.DataFrame([row for sample in data_samples for row in sample], columns=columns)
 
 
 def print_eval_scores(truth_df, decoded_df, step):
     if len(truth_df['sent_id'].unique()) != len(decoded_df['sent_id'].unique()):
         truth_df = truth_df.loc[truth_df['sent_id'].isin(decoded_df.sent_id.unique().tolist())]
-    aligned_scores = tb.seg_eval(truth_df, decoded_df, False)
-    mset_scores = tb.seg_eval(truth_df, decoded_df, True)
-    print(f'eval {step} aligned: [P: {aligned_scores[0]}, R: {aligned_scores[1]}, F: {aligned_scores[2]}]')
-    print(f'eval {step} mset   : [P: {mset_scores[0]}, R: {mset_scores[1]}, F: {mset_scores[2]}]')
+    # aligned_scores = tb.seg_eval(truth_df, decoded_df, False)
+    # mset_scores = tb.seg_eval(truth_df, decoded_df, True)
+    aligned_scores = tb.morph_eval(truth_df, decoded_df, ['form'], False)
+    mset_scores = tb.morph_eval(truth_df, decoded_df, ['form'], True)
+    print(f'seg eval {step} aligned: [P: {aligned_scores[0]}, R: {aligned_scores[1]}, F: {aligned_scores[2]}]')
+    print(f'seg eval {step} mset   : [P: {mset_scores[0]}, R: {mset_scores[1]}, F: {mset_scores[2]}]')
+
+    aligned_scores = tb.morph_eval(truth_df, decoded_df, ['tag'], False)
+    mset_scores = tb.morph_eval(truth_df, decoded_df, ['tag'], True)
+    print(f'tag eval {step} aligned: [P: {aligned_scores[0]}, R: {aligned_scores[1]}, F: {aligned_scores[2]}]')
+    print(f'tag eval {step} mset   : [P: {mset_scores[0]}, R: {mset_scores[1]}, F: {mset_scores[2]}]')
+
+    aligned_scores = tb.morph_eval(truth_df, decoded_df, ['form', 'tag'], False)
+    mset_scores = tb.morph_eval(truth_df, decoded_df, ['form', 'tag'], True)
+    print(f'joint seg-tag eval {step} aligned: [P: {aligned_scores[0]}, R: {aligned_scores[1]}, F: {aligned_scores[2]}]')
+    print(f'joint seg-tag eval {step} mset   : [P: {mset_scores[0]}, R: {mset_scores[1]}, F: {mset_scores[2]}]')
 
 
-def process(epoch, phase, print_every, model, data, target_raw_data, teacher_forcing_ratio, char_criterion,
+def process(epoch, phase, print_every, model, data, target_dataset, teacher_forcing_ratio, char_criterion,
             tag_criterion, optimizer=None, scheduler=None, max_grad_norm=None):
     print_form_char_loss, print_tag_loss, total_form_char_loss, total_tag_loss = 0, 0, 0, 0
-    print_data, total_data = [], []
+    print_data_samples, total_data_samples = [], []
     sos = torch.tensor([char_vocab['char2index']['<s>']], dtype=torch.long, device=device)
     eos = torch.tensor([char_vocab['char2index']['</s>']], dtype=torch.long, device=device)
     sep = torch.tensor([char_vocab['char2index']['<sep>']], dtype=torch.long, device=device)
@@ -337,25 +356,29 @@ def process(epoch, phase, print_every, model, data, target_raw_data, teacher_for
         predicted_tags = model.decode(tag_scores)
         # predicted_form_chars = target_form_chars[:, :target_form_chars_len, 0]
         # predicted_tags = target_tags[:, :target_tags_len, 0]
-        predicted_annotated_data = to_annotated_data(token_char_data, predicted_form_chars, max_form_len,
-                                                     predicted_tags, max_tags_len, eos, sep)
-        print_data.append(dataset.get_raw_data(predicted_annotated_data, char_vocab, tag_vocab, feats_vocab))
+        predicted_data_sample = to_data_sample(token_char_data.cpu(), predicted_form_chars.cpu(), max_form_len.cpu(),
+                                               predicted_tags.cpu(), max_tags_len.cpu(), eos.cpu(), sep.cpu())
+        print_data_samples.append(dataset.get_raw_data(predicted_data_sample, char_vocab, tag_vocab, feats_vocab))
         if (i + 1) % print_every == 0:
             print(f'epoch {epoch} {phase}, step {i + 1} form char loss: {print_form_char_loss / print_every}')
             print(f'epoch {epoch} {phase}, step {i + 1} tag loss: {print_tag_loss / print_every}')
-            print_sample(print_data[-1])
+            print_sample(print_data_samples[-1])
+            predicted_dataset = to_dataset(print_data_samples)
+            print_eval_scores(target_dataset, predicted_dataset, i + 1)
             total_form_char_loss += print_form_char_loss
             total_tag_loss += print_tag_loss
-            total_data.extend(print_data)
+            total_data_samples.extend(print_data_samples)
             print_form_char_loss, print_tag_loss = 0, 0
-            print_data = []
-    if len(print_data) > 0:
+            print_data_samples = []
+    if len(print_data_samples) > 0:
         total_form_char_loss += print_form_char_loss
         total_tag_loss += print_tag_loss
-        total_data.extend(print_data)
+        total_data_samples.extend(print_data_samples)
     print(f'epoch {epoch} {phase}, total form char loss: {total_form_char_loss / len(data)}')
     print(f'epoch {epoch} {phase}, total tag loss: {total_tag_loss / len(data)}')
-    return total_data
+    predicted_dataset = to_dataset(total_data_samples)
+    print_eval_scores(target_dataset, predicted_dataset, 'total')
+    return predicted_dataset
 
 
 teacher_forcing_ratio = 1.0
