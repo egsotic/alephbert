@@ -12,7 +12,6 @@ from pathlib import Path
 from model_tag import MorphTagModel, TokenSeq2SeqMorphTagger
 # from sklearn.metrics import accuracy_score, f1_score
 import pandas as pd
-import itertools
 
 
 # Logging setup
@@ -97,8 +96,6 @@ def to_raw_data(data, char_vocab, tag_vocab, feats_vocab):
     return raw_data
 
 
-# def to_dataframe(raw_data_list, columns):
-#     return pd.DataFrame(list(itertools.chain.from_iterable(raw_data_list)), columns=columns)
 def to_dataset(data_samples):
     columns = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
     return pd.DataFrame([row for sample in data_samples for row in sample], columns=columns)
@@ -127,49 +124,6 @@ else:
     raw_train_data.to_csv(raw_train_path, index=False)
     raw_dev_data.to_csv(raw_dev_path, index=False)
     raw_test_data.to_csv(raw_test_path, index=False)
-
-
-# Model
-char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float),
-                                        freeze=False, padding_idx=char_vocab['char2index']['<pad>'])
-num_layers = 1
-hidden_size = bert.config.hidden_size // num_layers
-enc_dropout = 0.1
-dec_dropout = 0.1
-seg_out_size = len(char_vocab['char2index'])
-out_dropout = 0.3
-num_tags = len(tag_vocab['tag2index'])
-token_tag_model = TokenSeq2SeqMorphTagger(char_emb=char_emb,
-                                          hidden_size=hidden_size, num_layers=num_layers,
-                                          enc_dropout=enc_dropout, dec_dropout=dec_dropout,
-                                          out_size=seg_out_size, out_dropout=out_dropout, num_labels=num_tags)
-morph_model = MorphTagModel(bert, bert_tokenizer, char_emb, token_tag_model)
-device = None
-if device is not None:
-    morph_model.to(device)
-print(morph_model)
-
-epochs = 3
-lr = 1e-3
-scheduler_warmup_steps = 200
-step_every = 1
-max_grad_norm = 5.0
-num_training_batchs = len(train_dataloader.dataset) // train_batch_size
-num_training_steps = num_training_batchs * epochs
-
-# Optimization
-# freeze bert
-for param in bert.parameters():
-    param.requires_grad = False
-parameters = list(filter(lambda p: p.requires_grad, morph_model.parameters()))
-# parameters = seg_model.parameters()
-adam = AdamW(parameters, lr=lr)
-char_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=char_vocab['char2index']['<pad>'])
-tag_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=tag_vocab['tag2index']['<pad>'])
-
-lr_scheduler = get_linear_schedule_with_warmup(adam, num_warmup_steps=scheduler_warmup_steps,
-                                               num_training_steps=num_training_steps)
-# optimizer = ModelOptimizer(parameters, optimizer, optim_step_every, optim_max_grad_norm, lr_scheduler)
 
 
 def _to_packed_form_char_data(form_chars, max_form_len, max_tag_len, eos, sep):
@@ -285,11 +239,6 @@ def print_sample(sample_data):
     print(' '.join(sample))
 
 
-# def to_dataset(data_samples):
-#     columns = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
-#     return pd.DataFrame([row for sample in data_samples for row in sample], columns=columns)
-
-
 def print_eval_scores(truth_df, decoded_df, step):
     if len(truth_df['sent_id'].unique()) != len(decoded_df['sent_id'].unique()):
         truth_df = truth_df.loc[truth_df['sent_id'].isin(decoded_df.sent_id.unique().tolist())]
@@ -380,6 +329,46 @@ def process(epoch, phase, print_every, model, data, target_dataset, teacher_forc
     print_eval_scores(target_dataset, predicted_dataset, 'total')
     return predicted_dataset
 
+
+# Model
+char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float),
+                                        freeze=False, padding_idx=char_vocab['char2index']['<pad>'])
+num_layers = 1
+hidden_size = bert.config.hidden_size // num_layers
+enc_dropout = 0.1
+dec_dropout = 0.1
+seg_out_size = len(char_vocab['char2index'])
+out_dropout = 0.3
+num_tags = len(tag_vocab['tag2index'])
+token_tag_model = TokenSeq2SeqMorphTagger(char_emb=char_emb,
+                                          hidden_size=hidden_size, num_layers=num_layers,
+                                          enc_dropout=enc_dropout, dec_dropout=dec_dropout,
+                                          out_size=seg_out_size, out_dropout=out_dropout, num_labels=num_tags)
+morph_model = MorphTagModel(bert, bert_tokenizer, char_emb, token_tag_model)
+device = None
+if device is not None:
+    morph_model.to(device)
+print(morph_model)
+char_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=char_vocab['char2index']['<pad>'])
+tag_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=tag_vocab['tag2index']['<pad>'])
+
+# Optimization
+epochs = 3
+scheduler_warmup_steps = 200
+step_every = 1
+max_grad_norm = 5.0
+num_training_batchs = len(train_dataloader.dataset) // train_batch_size
+num_training_steps = num_training_batchs * epochs
+lr = 1e-3
+# freeze bert
+for param in bert.parameters():
+    param.requires_grad = False
+parameters = list(filter(lambda p: p.requires_grad, morph_model.parameters()))
+# parameters = seg_model.parameters()
+adam = AdamW(parameters, lr=lr)
+lr_scheduler = get_linear_schedule_with_warmup(adam, num_warmup_steps=scheduler_warmup_steps,
+                                               num_training_steps=num_training_steps)
+# optimizer = ModelOptimizer(parameters, optimizer, optim_step_every, optim_max_grad_norm, lr_scheduler)
 
 teacher_forcing_ratio = 1.0
 for i in trange(epochs, desc="Epoch"):

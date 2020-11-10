@@ -46,21 +46,24 @@ class TokenSeq2SeqMorphTagger(nn.Module):
         while len(dec_char_scores) < max_len and len(dec_label_scores) < max_num_tags:
             emb_dec_char = self.char_emb(dec_char).unsqueeze(1)
             dec_output, dec_state = self.decoder(emb_dec_char, dec_state)
-            dec_output = self.dropout(dec_output)
-            dec_output = self.out(dec_output)
+            cur_dec_output = self.dropout(dec_output)
+            cur_dec_char_scores = self.out(cur_dec_output)
             if target_char_seq is not None:
                 dec_char = target_char_seq[:, len(dec_char_scores), 0]
             else:
-                dec_char = self.decode(dec_output).squeeze(0)
-            dec_char_scores.append(dec_output)
+                dec_char = self.decode(cur_dec_char_scores).squeeze(0)
+            dec_char_scores.append(cur_dec_char_scores)
             if torch.eq(dec_char, special_symbols['<sep>']):
-                cur_seq_label_scores = self.classifier(dec_state[-1:])
-                dec_label_scores.append(cur_seq_label_scores)
+                # cur_dec_label_state = self.dropout(dec_state[-1:])
+                # cur_dec_label_scores = self.classifier(cur_dec_label_state)
+                cur_dec_label_scores = self.classifier(cur_dec_output)
+                dec_label_scores.append(cur_dec_label_scores)
             if torch.all(torch.eq(dec_char, special_symbols['</s>'])):
                 break
         if len(dec_label_scores) < max_num_tags:
-            classifier_output = self.classifier(dec_state[-1:])
-            dec_label_scores.append(classifier_output)
+            # classifier_output = self.classifier(dec_state[-1:])
+            cur_dec_label_scores = self.classifier(cur_dec_output)
+            dec_label_scores.append(cur_dec_label_scores)
         fill_len = max_len - len(dec_char_scores)
         dec_char_scores.extend([dec_char_scores[-1]] * fill_len)
         fill_len = max_num_tags - len(dec_label_scores)
