@@ -242,22 +242,12 @@ def print_sample(sample_data):
 def print_eval_scores(truth_df, decoded_df, step):
     if len(truth_df['sent_id'].unique()) != len(decoded_df['sent_id'].unique()):
         truth_df = truth_df.loc[truth_df['sent_id'].isin(decoded_df.sent_id.unique().tolist())]
-    # aligned_scores = tb.seg_eval(truth_df, decoded_df, False)
-    # mset_scores = tb.seg_eval(truth_df, decoded_df, True)
-    aligned_scores = tb.morph_eval(truth_df, decoded_df, ['form'], False)
-    mset_scores = tb.morph_eval(truth_df, decoded_df, ['form'], True)
-    print(f'seg eval {step} aligned: [P: {aligned_scores[0]}, R: {aligned_scores[1]}, F: {aligned_scores[2]}]')
-    print(f'seg eval {step} mset   : [P: {mset_scores[0]}, R: {mset_scores[1]}, F: {mset_scores[2]}]')
-
-    aligned_scores = tb.morph_eval(truth_df, decoded_df, ['tag'], False)
-    mset_scores = tb.morph_eval(truth_df, decoded_df, ['tag'], True)
-    print(f'tag eval {step} aligned: [P: {aligned_scores[0]}, R: {aligned_scores[1]}, F: {aligned_scores[2]}]')
-    print(f'tag eval {step} mset   : [P: {mset_scores[0]}, R: {mset_scores[1]}, F: {mset_scores[2]}]')
-
-    aligned_scores = tb.morph_eval(truth_df, decoded_df, ['form', 'tag'], False)
-    mset_scores = tb.morph_eval(truth_df, decoded_df, ['form', 'tag'], True)
-    print(f'joint seg-tag eval {step} aligned: [P: {aligned_scores[0]}, R: {aligned_scores[1]}, F: {aligned_scores[2]}]')
-    print(f'joint seg-tag eval {step} mset   : [P: {mset_scores[0]}, R: {mset_scores[1]}, F: {mset_scores[2]}]')
+    aligned_scores, mset_scores = tb.morph_eval(truth_df, decoded_df, ['form', 'tag'])
+    for fs in aligned_scores:
+        p, r, f = aligned_scores[fs]
+        print(f'eval {step} aligned {fs}: [P: {p}, R: {r}, F: {f}]')
+        p, r, f = mset_scores[fs]
+        print(f'eval {step} mset    {fs}: [P: {p}, R: {r}, F: {f}]')
 
 
 def process(epoch, phase, print_every, model, data, target_dataset, teacher_forcing_ratio, char_criterion,

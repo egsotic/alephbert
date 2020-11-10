@@ -1,10 +1,10 @@
 # import sys
 # sys.path.insert(0, "/Users/Amit/dev/aseker00/AlephBert/src/bclm")
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 import pandas as pd
 import logging
-
+import itertools
 from bclm.format import lattice
 
 
@@ -37,34 +37,48 @@ def spmrl(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
     return partition
 
 
-def morph_eval(gold_df, pred_df, fields, use_mset):
+def get_subsets(s, n):
+    return list(itertools.combinations(s, n))
+
+
+def morph_eval(gold_df, pred_df, fields):
     gold_gb = gold_df.groupby([gold_df.sent_id, gold_df.token_id])
     pred_gb = pred_df.groupby([pred_df.sent_id, pred_df.token_id])
-    gold_counts, pred_counts, intersection_counts = 0, 0, 0
+    aligned_gold_counts, aligned_pred_counts, aligned_intersection_counts = defaultdict(int), defaultdict(int), defaultdict(int)
+    mset_gold_counts, mset_pred_counts, mset_intersection_counts = defaultdict(int), defaultdict(int), defaultdict(int)
     for (sent_id, token_id), gold in sorted(gold_gb):
-        # gold_forms = gold.form.tolist()
-        gold_values = [tuple(row[1].values) for row in gold[fields].iterrows()]
-        if (sent_id, token_id) not in pred_gb.groups:
-            pred_values = []
-        else:
-            pred = pred_gb.get_group((sent_id, token_id))
-            # pred_forms = pred.form.tolist()
-            pred_values = [tuple(row[1].values) for row in pred[fields].iterrows()]
-        if use_mset:
-            gold_count, pred_count = Counter(gold_values), Counter(pred_values)
-            intersection_count = gold_count & pred_count
-            gold_counts += sum(gold_count.values())
-            pred_counts += sum(pred_count.values())
-            intersection_counts += sum(intersection_count.values())
-        else:
-            intersection_forms = [p for g, p in zip(gold_values, pred_values) if p == g]
-            gold_counts += len(gold_values)
-            pred_counts += len(pred_values )
-            intersection_counts += len(intersection_forms)
-    precision = intersection_counts / pred_counts if pred_counts else 0.0
-    recall = intersection_counts / gold_counts if gold_counts else 0.0
-    f1 = 2.0 * (precision * recall) / (precision + recall) if precision + recall else 0.0
-    return precision, recall, f1
+        for n in range(1, len(fields) + 1):
+            fsets = get_subsets(fields, n)
+            for fs in fsets:
+                gold_values = [tuple(row[1].values) for row in gold[list(fs)].iterrows()]
+                if (sent_id, token_id) not in pred_gb.groups:
+                    pred_values = []
+                else:
+                    pred = pred_gb.get_group((sent_id, token_id))
+                    pred_values = [tuple(row[1].values) for row in pred[list(fs)].iterrows()]
+                # mset
+                gold_count, pred_count = Counter(gold_values), Counter(pred_values)
+                intersection_count = gold_count & pred_count
+                mset_gold_counts[fs] += sum(gold_count.values())
+                mset_pred_counts[fs] += sum(pred_count.values())
+                mset_intersection_counts[fs] += sum(intersection_count.values())
+                # aligned
+                intersection_values = [p for g, p in zip(gold_values, pred_values) if p == g]
+                aligned_gold_counts[fs] += len(gold_values)
+                aligned_pred_counts[fs] += len(pred_values)
+                aligned_intersection_counts[fs] += len(intersection_values)
+    aligned_scores, mset_scores = {}, {}
+    for fs in aligned_gold_counts:
+        precision = aligned_intersection_counts[fs] / aligned_pred_counts[fs] if aligned_pred_counts[fs] else 0.0
+        recall = aligned_intersection_counts[fs] / aligned_gold_counts[fs] if aligned_gold_counts[fs] else 0.0
+        f1 = 2.0 * (precision * recall) / (precision + recall) if precision + recall else 0.0
+        aligned_scores[fs] = precision, recall, f1
+    for fs in mset_gold_counts:
+        precision = mset_intersection_counts[fs] / mset_pred_counts[fs] if mset_pred_counts[fs] else 0.0
+        recall = mset_intersection_counts[fs] / mset_gold_counts[fs] if mset_gold_counts[fs] else 0.0
+        f1 = 2.0 * (precision * recall) / (precision + recall) if precision + recall else 0.0
+        mset_scores[fs] = precision, recall, f1
+    return aligned_scores, mset_scores
 
 
 def main():
