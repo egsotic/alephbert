@@ -5,18 +5,67 @@ from pathlib import Path
 import pandas as pd
 import logging
 import itertools
-from bclm.format import lattice
+from bclm.format import conllx, conllu
+
+
+def spmrl_conllu_ner(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
+    partition = {'train': None, 'dev': None, 'test': None}
+    ma_type = ma_name if ma_name is not None else 'gold'
+    data_tb_path = Path(data_root_path) / tb_name / ma_type
+    if tb_root_path is not None:
+        data_tb_path.mkdir(parents=True, exist_ok=True)
+        logging.info(f'loading treebank: {tb_root_path}')
+        partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
+        for part in partition:
+            df = partition[part]
+            tag = df['tag'].tolist()
+            feats = [{ff.split('=')[0]: ff.split('=')[1] for ff in f.split('|')} for f in df['feats'].tolist()]
+            ner = [f['biose_layer0'] for f in feats]
+            for f, t in zip(feats, tag):
+                f['tag'] = t
+                f.pop('biose_layer0', None)
+            tag_feats = ['|'.join([f'{k}={f[k]}' for k in f]) for f in feats]
+            df['tag'] = ner
+            df['feats'] = tag_feats
+            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            logging.info(f'saving: {lattice_file_path}')
+            df.to_csv(lattice_file_path)
+    else:
+        for part in partition:
+            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            logging.info(f'loading: {lattice_file_path}')
+            partition[part] = pd.read_csv(lattice_file_path, index_col=0)
+    return partition
+
+
+def spmrl_conllu(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
+    partition = {'train': None, 'dev': None, 'test': None}
+    ma_type = ma_name if ma_name is not None else 'gold'
+    data_tb_path = Path(data_root_path) / tb_name / ma_type
+    if tb_root_path is not None:
+        data_tb_path.mkdir(parents=True, exist_ok=True)
+        logging.info(f'loading treebank: {tb_root_path}')
+        partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
+        for part in partition:
+            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            logging.info(f'saving: {lattice_file_path}')
+            partition[part].to_csv(lattice_file_path)
+    else:
+        for part in partition:
+            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            logging.info(f'loading: {lattice_file_path}')
+            partition[part] = pd.read_csv(lattice_file_path, index_col=0)
+    return partition
 
 
 def spmrl(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
-    # if not local_tb_path.exists():
     if tb_root_path is not None:
         data_tb_path.mkdir(parents=True, exist_ok=True)
         logging.info(f'loading treebank: {tb_root_path}')
-        partition = lattice.load_spmrl(Path(tb_root_path), partition, tb_name, ma_name)
+        partition = conllx.load_conllx(tb_root_path, partition, tb_name, ma_name)
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
             logging.info(f'saving: {lattice_file_path}')
@@ -82,8 +131,10 @@ def morph_eval(gold_df, pred_df, fields):
 
 
 def main():
-    gold_partition = spmrl('data/raw', '/Users/Amit/dev/onlplab/HebrewResources')
-    gold_partition = spmrl('data/raw')
+    gold_partition = spmrl_conllu_ner(Path('data/raw/for_amit_spmrl'), Path('/Users/Amit/dev/onlplab/HebrewResources/for_amit_spmrl'))
+    gold_partition = spmrl_conllu_ner(Path('data/raw/for_amit_spmrl'))
+    # gold_partition = spmrl(Path('data/raw/HebrewTreebank'), Path('/Users/Amit/dev/onlplab/HebrewResources/HebrewTreebank'))
+    # gold_partition = spmrl(Path('data/raw/HebrewTreebank'))
     # ma_partition = spmrl('data/raw', '/Users/Amit/dev/onlplab/HebrewResources', ma_name='heblex')
 
 
