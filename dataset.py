@@ -539,6 +539,7 @@ def load_vocab(partition, xtokenizer):
         morph_data = pd.read_csv(str(morph_file), index_col=0)
         tags |= set(morph_data.tag)
         feats |= set(morph_data.feats)
+    feats.add('_')
     tag2index = {t: i for i, t in enumerate(sorted(list(tags)))}
     index2tag = {v: k for k, v in tag2index.items()}
     tag_vocab = {'tag2index': tag2index, 'index2tag': index2tag}
