@@ -1,11 +1,21 @@
-# import sys
-# sys.path.insert(0, "/Users/Amit/dev/aseker00/AlephBert/src/bclm")
 from collections import Counter, defaultdict
 from pathlib import Path
 import pandas as pd
 import logging
 import itertools
+import csv
 from bclm.format import conllx, conllu
+from bclm import ne_evaluate_mentions
+
+
+def save_lattice_as_ner_format(input_lattice_file_path, output_ner_file_path):
+    df = pd.read_csv(input_lattice_file_path)
+    gb = df.groupby('sent_id')
+    for sid, group in gb:
+        group[['form', 'tag']].to_csv(output_ner_file_path,
+                                      mode='a', header=False, index=False, sep=' ', quoting=csv.QUOTE_NONE)
+        with open(output_ner_file_path, 'a', newline='\n') as f:
+            f.write('\n')
 
 
 def spmrl_conllu_ner(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
@@ -38,12 +48,11 @@ def spmrl_conllu_ner(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name
     return partition
 
 
-def spmrl_conllu(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
+def spmrl_conllu(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
     if tb_root_path is not None:
-        data_tb_path.mkdir(parents=True, exist_ok=True)
         logging.info(f'loading treebank: {tb_root_path}')
         partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
         for part in partition:
@@ -58,12 +67,11 @@ def spmrl_conllu(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=Non
     return partition
 
 
-def spmrl(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
+def spmrl(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
     if tb_root_path is not None:
-        data_tb_path.mkdir(parents=True, exist_ok=True)
         logging.info(f'loading treebank: {tb_root_path}')
         partition = conllx.load_conllx(tb_root_path, partition, tb_name, ma_name)
         for part in partition:
@@ -75,14 +83,25 @@ def spmrl(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
             logging.info(f'loading: {lattice_file_path}')
             partition[part] = pd.read_csv(lattice_file_path, index_col=0)
-        # partition = {part: pd.read_csv(data_root_path / f'{part}_{tb_name}-{ma_type}.lattices.csv', index_col=0) for part in partition}
-    # tb = {}
-    # for part in partition:
-    #     df = partition[part]
-    #     gb = df.groupby(df.sent_id)
-    #     tb[part] = [gb.get_group(x).reset_index(drop=True) for x in gb.groups]
-    #     logging.info(f'{tb_name} {part} lattices: {len(tb[part])}')
-    # return tb
+    return partition
+
+
+def ud(data_root_path, tb_name, tb_root_path=None, ma_name=None):
+    partition = {'train': None, 'dev': None, 'test': None}
+    ma_type = ma_name if ma_name is not None else 'gold'
+    data_tb_path = Path(data_root_path) / tb_name / ma_type
+    if tb_root_path is not None:
+        logging.info(f'loading treebank: {tb_root_path}')
+        partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
+        for part in partition:
+            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            logging.info(f'saving: {lattice_file_path}')
+            partition[part].to_csv(lattice_file_path)
+    else:
+        for part in partition:
+            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            logging.info(f'loading: {lattice_file_path}')
+            partition[part] = pd.read_csv(lattice_file_path, index_col=0)
     return partition
 
 
@@ -90,7 +109,7 @@ def get_subsets(s, n):
     return list(itertools.combinations(s, n))
 
 
-def morph_eval(gold_df, pred_df, fields):
+def morph_eval(pred_df, gold_df, fields):
     gold_gb = gold_df.groupby([gold_df.sent_id, gold_df.token_id])
     pred_gb = pred_df.groupby([pred_df.sent_id, pred_df.token_id])
     aligned_gold_counts, aligned_pred_counts, aligned_intersection_counts = defaultdict(int), defaultdict(int), defaultdict(int)
@@ -130,13 +149,5 @@ def morph_eval(gold_df, pred_df, fields):
     return aligned_scores, mset_scores
 
 
-def main():
-    gold_partition = spmrl_conllu_ner(Path('data/raw/for_amit_spmrl'), Path('/Users/Amit/dev/onlplab/HebrewResources/for_amit_spmrl'))
-    gold_partition = spmrl_conllu_ner(Path('data/raw/for_amit_spmrl'))
-    # gold_partition = spmrl(Path('data/raw/HebrewTreebank'), Path('/Users/Amit/dev/onlplab/HebrewResources/HebrewTreebank'))
-    # gold_partition = spmrl(Path('data/raw/HebrewTreebank'))
-    # ma_partition = spmrl('data/raw', '/Users/Amit/dev/onlplab/HebrewResources', ma_name='heblex')
-
-
-if __name__ == '__main__':
-    main()
+def ner_eval(ner_file_path, truth_file_path, with_type=True):
+    ne_evaluate_mentions.evaluate_files(truth_file_path, ner_file_path, ignore_cat=with_type)

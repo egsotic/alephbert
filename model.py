@@ -107,3 +107,5 @@ class MorphSegModel(nn.Module):
 
     def decode(self, label_scores):
         return torch.argmax(label_scores, dim=2)
+
+

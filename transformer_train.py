@@ -1,9 +1,10 @@
 import logging
 from pathlib import Path
 from transformers import (
-    BertConfig, RobertaConfig, RobertaForMaskedLM, BertForMaskedLM, LineByLineTextDataset,
+    BertConfig, RobertaConfig, RobertaForMaskedLM, BertForMaskedLM, LineByLineTextDataset, TextDataset,
     DataCollatorForLanguageModeling, TrainingArguments, Trainer, RobertaTokenizerFast, BertTokenizerFast, set_seed
 )
+from datasets import load_dataset
 
 
 def get_config(vocab_size):
@@ -39,7 +40,11 @@ def get_model(vocab_size):
     return BertForMaskedLM(config=config)
 
 
-def get_train_data(epoch):
+def encode(examples):
+    return tokenizer(examples['text'], truncation=True, padding='max_length')
+
+
+def get_train_data1(tokenizer, epoch):
     p = Path('data/raw/oscar') / f'he_dedup-train-{(epoch % 2) + 1}.txt'
     logger.info(f'{transformer_type} training data: {p}')
     return LineByLineTextDataset(
@@ -49,33 +54,71 @@ def get_train_data(epoch):
     )
 
 
-def get_dev_data():
-    return LineByLineTextDataset(
+def get_train_data2(tokenizer):
+    p = Path('data/raw/oscar/he_dedup-1000.txt')
+    logger.info(f'{transformer_type} training data: {p}')
+    return TextDataset(
         tokenizer=tokenizer,
-        file_path='./data/raw/oscar/he_dedup-eval.txt',
+        file_path=str(p),
         block_size=128,
     )
+
+
+def get_train_data3():
+    p = Path('data/raw/oscar/he_dedup-1000.txt')
+    logger.info(f'loading training data from: {p}')
+    ds = load_dataset('text', data_files=[str(p)])
+    padding = "max_length"
+    def tokenize_function(examples):
+        # Remove empty lines
+        examples["text"] = [line for line in examples["text"] if len(line) > 0 and not line.isspace()]
+        return tokenizer(
+            examples["text"],
+            # padding=padding,
+            truncation=True,
+            # max_length=512,
+            # We use this option because DataCollatorForLanguageModeling (see below) is more efficient when it
+            # receives the `special_tokens_mask`.
+            return_special_tokens_mask=True,
+        )
+
+    return ds.map(
+        tokenize_function,
+        batched=True,
+        num_proc=2,
+        remove_columns=["text"],
+        load_from_cache_file=True,
+    )
+
+
+# def get_dev_data():
+#     return LineByLineTextDataset(
+#         tokenizer=tokenizer,
+#         file_path='./data/raw/oscar/he_dedup-eval.txt',
+#         block_size=128,
+#     )
 
 
 def get_data_collator():
     return DataCollatorForLanguageModeling(tokenizer=tokenizer)
 
 
-def get_train_args(vocab_size):
+def get_train_args(epochs=1, lr=1e-4):
     p = Path('experiments/transformers') / f'{transformer_type}-{tokenizer_type}-{vocab_size}'
-    p.mkdir(parents=True, exist_ok=True)
+    # p.mkdir(parents=True, exist_ok=True)
     return TrainingArguments(
         output_dir=str(p),
         overwrite_output_dir=True,
-        num_train_epochs=1,
-        per_device_train_batch_size=32,
-        save_steps=10000,
-        save_total_limit=2,
-        # learning_rate=1e-4,
-        do_train=True,
-        do_eval=True,
+        # num_train_epochs=epochs,
+        # per_device_train_batch_size=32,
+        # save_steps=10000,
+        # save_total_limit=2,
+        # learning_rate=lr,
+        # do_train=True,
+        # do_eval=True,
         # evaluation_strategy='steps',
-        logging_steps=10000
+        # fp16=True,
+        # logging_steps=10000
     )
 
 
@@ -96,21 +139,22 @@ tokenizer_type = 'wordpiece'
 transformer_type = 'bert'
 
 # vocab_size = 52000
-vocab_size = 2000
-training_args = get_train_args(vocab_size)
+vocab_size = 52000
+training_args = get_train_args()
 tokenizer = get_tokenizer(vocab_size)
 model = get_model(vocab_size)
 data_collator = get_data_collator()
-dev_dataset = get_dev_data()
-train_dataset = get_train_data(0)
+# dev_dataset = get_dev_data()
+# train_dataset = get_train_data2(tokenizer)
+train_dataset = get_train_data3()
 
 trainer = Trainer(
     model=model,
     args=training_args,
     data_collator=data_collator,
-    train_dataset=train_dataset,
-    eval_dataset=dev_dataset,
-    prediction_loss_only=True
+    train_dataset=train_dataset['train'],
+    # eval_dataset=dev_dataset,
+    # prediction_loss_only=True
 )
 
 # logger.warning(
