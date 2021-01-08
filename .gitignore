@@ -1,4 +1,7 @@
 .idea/
 __pycache__/
-data/
+data/raw
+data/preprocessed
 experiments/
+runs/
+.ipynb_checkpoints
