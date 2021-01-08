@@ -25,8 +25,8 @@ if __name__ == '__main__':
     # preprocessed_root_path = Path('data/preprocessed/HebrewTreebank/hebtb')
 
 
-    # raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path)
-    raw_partition = tb.ud(raw_root_path, 'HTB')
+    raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path)
+    # raw_partition = tb.ud(raw_root_path, 'HTB')
     # gold_partition = tb.spmrl_conllu_ner(raw_root_path, 'hebtb', tb_root_path)
     # gold_partition = tb.spmrl_conllu_ner(raw_root_path, 'hebtb')
     # gold_partition = tb.spmrl(raw_root_path, 'hebtb', tb_root_path)

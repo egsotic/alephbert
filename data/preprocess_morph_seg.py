@@ -1,4 +1,4 @@
-from preprocess_base import *
+from .preprocess_base import *
 
 
 def _insert_morph_ids(df: pd.DataFrame):

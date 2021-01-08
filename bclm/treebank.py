@@ -53,6 +53,7 @@ def spmrl_conllu(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
     if tb_root_path is not None:
+        data_tb_path.mkdir(parents=True, exist_ok=True)
         logging.info(f'loading treebank: {tb_root_path}')
         partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
         for part in partition:
@@ -72,6 +73,7 @@ def spmrl(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
     if tb_root_path is not None:
+        data_tb_path.mkdir(parents=True, exist_ok=True)
         logging.info(f'loading treebank: {tb_root_path}')
         partition = conllx.load_conllx(tb_root_path, partition, tb_name, ma_name)
         for part in partition:
@@ -91,6 +93,7 @@ def ud(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
     if tb_root_path is not None:
+        data_tb_path.mkdir(parents=True, exist_ok=True)
         logging.info(f'loading treebank: {tb_root_path}')
         partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
         for part in partition:

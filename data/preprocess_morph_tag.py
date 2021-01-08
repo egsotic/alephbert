@@ -1,4 +1,4 @@
-from preprocess_base import *
+from .preprocess_base import *
 
 
 def _collate_morph_tag_data_samples(morph_df: pd.DataFrame, tag2index: dict):
