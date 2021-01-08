@@ -128,7 +128,7 @@ def get_morph_data(data_path: Path, raw_partition: dict):
     for part in raw_partition:
         morph_file = data_path / f'{part}_morph.csv'
         if not morph_file.exists():
-            logging.info(f'processing {part} morphemes')
+            logging.info(f'preprocessing {part} morphemes')
             morph_df = _get_morph_df(raw_partition[part])
             logging.info(f'saving {morph_file}')
             morph_df.to_csv(str(morph_file))
@@ -144,7 +144,7 @@ def get_morph_form_char_data(data_path: Path, morph_partition: dict):
     for part in morph_partition:
         morph_form_char_file = data_path / f'{part}_morph_form_char.csv'
         if not morph_form_char_file.exists():
-            logging.info(f'processing {part} morpheme form chars')
+            logging.info(f'preprocessing {part} morpheme form chars')
             morph_form_char_df = _create_morph_form_char_df(morph_partition[part])
             logging.info(f'saving {morph_form_char_file}')
             morph_form_char_df.to_csv(str(morph_form_char_file))
@@ -159,7 +159,7 @@ def save_morph_form_char_data_samples(data_path: Path, morph_form_char_partition
     form_char_samples_partition = {}
     for part in morph_form_char_partition:
         form_char_samples_file = data_path / f'{part}_morph_form_char_data_samples.csv'
-        logging.info(f'processing {part} morph form char data samples')
+        logging.info(f'preprocessing {part} morph form char data samples')
         samples_df = _collate_morph_form_char_data_samples(morph_form_char_partition[part], char2index)
         logging.info(f'saving {form_char_samples_file}')
         samples_df.to_csv(str(form_char_samples_file))

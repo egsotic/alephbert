@@ -11,29 +11,34 @@ if __name__ == '__main__':
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO
     )
-    tb_root_path = Path('/Users/Amit/dev/onlplab/UniversalDependencies')
-    # tb_root_path = Path('/Users/Amit/dev/onlplab/HebrewResources/for_amit_spmrl')
-    # tb_root_path = Path('/Users/Amit/dev/onlplab/HebrewResources/HebrewTreebank')
+
+    bert_version = 'bert-distilled-wordpiece-oscar-52000'
+
+    tb_root_path = Path('/Users/Amit/dev/onlplab')
+    tb_root_path = tb_root_path / 'UniversalDependencies'
+    # tb_root_path = tb_root_path / 'HebrewResources/for_amit_spmrl'
+    # tb_root_path = tb_root_path / 'HebrewResources/HebrewTreebank'
 
     raw_root_path = Path('data/raw/UD_Hebrew')
     # raw_root_path = Path('data/raw/for_amit_spmrl')
     # raw_root_path = Path('data/raw/HebrewTreebank')
 
-    preprocessed_root_path = Path('data/preprocessed/UD_Hebrew/HTB/bert-distilled-wordpiece-oscar-52000')
+    preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{bert_version}')
+    # preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{bert_version}')
+    # preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{bert_version}')
     preprocessed_root_path.mkdir(parents=True, exist_ok=True)
-    # preprocessed_root_path = Path('data/preprocessed/for_amit_spmrl/hebtb')
-    # preprocessed_root_path = Path('data/preprocessed/HebrewTreebank/hebtb')
 
-
-    raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path)
-    # raw_partition = tb.ud(raw_root_path, 'HTB')
-    # gold_partition = tb.spmrl_conllu_ner(raw_root_path, 'hebtb', tb_root_path)
-    # gold_partition = tb.spmrl_conllu_ner(raw_root_path, 'hebtb')
-    # gold_partition = tb.spmrl(raw_root_path, 'hebtb', tb_root_path)
-    # gold_partition = tb.spmrl(raw_root_path, 'hebtb')
+    if not raw_root_path.exists():
+        raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path)
+        # raw_partition = tb.spmrl_conllu_ner(raw_root_path, 'hebtb', tb_root_path)
+        # raw_partition = tb.spmrl(raw_root_path, 'hebtb', tb_root_path)
+    else:
+        raw_partition = tb.ud(raw_root_path, 'HTB')
+        # raw_partition = tb.spmrl_conllu_ner(raw_root_path, 'hebtb')
+        # raw_partition = tb.spmrl(raw_root_path, 'hebtb')
 
     ft_root_path = Path('/Users/Amit/dev/fastText')
-    bert_root_path = Path('./experiments/transformers/bert/distilled/wordpiece/bert-distilled-wordpiece-oscar-52000')
+    bert_root_path = Path(f'./experiments/transformers/bert/distilled/wordpiece/{bert_version}')
     bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_root_path))
 
     morph_data = get_morph_data(preprocessed_root_path, raw_partition)

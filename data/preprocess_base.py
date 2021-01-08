@@ -90,7 +90,8 @@ def save_char_vocab(data_path: Path, ft_root_path: Path, raw_partition: dict):
     tokens = set(token for part in raw_partition for token in raw_partition[part].token)
     forms = set(token for part in raw_partition for token in raw_partition[part].form)
     lemmas = set(token for part in raw_partition for token in raw_partition[part].lemma)
-    chars = set(c.lower() for word in list(tokens) + list(forms) + list(lemmas) for c in word)
+    # chars = set(c.lower() for word in list(tokens) + list(forms) + list(lemmas) for c in word)
+    chars = set(c for word in list(tokens) + list(forms) + list(lemmas) for c in word)
     chars = ['<pad>', '<sep>', '<s>', '</s>'] + sorted(list(chars))
     char_vectors, char2index = ft.get_word_vectors('he', ft_root_path / 'models/cc.he.300.bin', chars)
     ft.save_word_vectors(data_path / 'ft_char.vec.txt', char_vectors, char2index)
@@ -109,7 +110,7 @@ def get_token_char_data(data_path: Path, morph_partition: dict):
     for part in morph_partition:
         token_char_file = data_path / f'{part}_token_char.csv'
         if not token_char_file.exists():
-            logging.info(f'processing {part} token chars')
+            logging.info(f'preprocessing {part} token chars')
             token_char_df = _create_token_char_df(morph_partition[part])
             logging.info(f'saving {token_char_file}')
             token_char_df.to_csv(str(token_char_file))
@@ -125,7 +126,7 @@ def get_xtoken_data(data_path: Path, morph_partition: dict, xtokenizer: BertToke
     for part in morph_partition:
         xtoken_file = data_path / f'{part}_xtoken.csv'
         if not xtoken_file.exists():
-            logging.info(f'processing {part} xtokens')
+            logging.info(f'preprocessing {part} xtokens')
             xtoken_df = _create_xtoken_df(morph_partition[part], xtokenizer)
             logging.info(f'saving {xtoken_file}')
             xtoken_df.to_csv(str(xtoken_file))
@@ -140,7 +141,7 @@ def save_xtoken_data_samples(data_path: Path, xtoken_partition: dict, xtokenizer
     xtoken_samples_partition = {}
     for part in xtoken_partition:
         xtoken_samples_file = data_path / f'{part}_xtoken_data_samples.csv'
-        logging.info(f'processing {part} xtoken data samples')
+        logging.info(f'preprocessing {part} xtoken data samples')
         samples_df = _collate_xtoken_data_samples(xtoken_partition[part], xtokenizer)
         logging.info(f'saving {xtoken_samples_file}')
         samples_df.to_csv(str(xtoken_samples_file))
@@ -162,7 +163,7 @@ def save_token_char_data_samples(data_path: Path, token_partition: dict, char2in
     token_char_samples_partition = {}
     for part in token_partition:
         token_char_samples_file = data_path / f'{part}_token_char_data_samples.csv'
-        logging.info(f'processing {part} token char data samples')
+        logging.info(f'preprocessing {part} token char data samples')
         samples_df = _collate_token_char_data_samples(token_partition[part], char2index)
         logging.info(f'saving {token_char_samples_file}')
         samples_df.to_csv(str(token_char_samples_file))

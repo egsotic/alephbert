@@ -76,7 +76,7 @@ def save_morph_tag_data_samples(data_path: Path, morph_partition: dict, tag2inde
     tag_samples_partition = {}
     for part in morph_partition:
         tag_samples_file = data_path / f'{part}_morph_tag_data_samples.csv'
-        logging.info(f'processing {part} morph tag data samples')
+        logging.info(f'preprocessing {part} morph tag data samples')
         samples_df = _collate_morph_tag_data_samples(morph_partition[part], tag2index)
         logging.info(f'saving {tag_samples_file}')
         samples_df.to_csv(str(tag_samples_file))
