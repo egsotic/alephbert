@@ -66,11 +66,8 @@ def get_word_vectors(lang, model_path, words: list):
     if lang not in ft_models:
         logging.info(f'Loading FastText model from {model_path}')
         ft_models[lang] = fasttext.load_model(f'{model_path}')
-    # word2index = {word: i+1 for i, word in enumerate(sorted(words))}
-    # word_vectors = np.stack([ft_models[lang].get_word_vector(word) if word.lower() != '<pad>' else ft_pad_vector
-    #                          for word in sorted(words)], axis=0)
     word2index = {word: i + 1 for i, word in enumerate(words)}
-    word_vectors = np.stack([ft_models[lang].get_word_vector(word) if word.lower() != '<pad>' else ft_pad_vector
+    word_vectors = np.stack([ft_models[lang].get_word_vector(word) if word != '<pad>' else ft_pad_vector
                              for word in words], axis=0)
     return word_vectors, word2index
 

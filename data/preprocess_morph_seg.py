@@ -40,9 +40,8 @@ def _create_morph_form_char_df(morph_df: pd.DataFrame):
             data_chars[-1] = '</s>'
             prev_token_id = cur_token_id
             if sent_id != prev_sent_id:
-                data_chars[-1] = '</s>'
                 tq.update(1)
-                prev_token_id = 0
+                prev_token_id = 1
                 prev_sent_id = sent_id
         chars = list(morph_df.char) + ['<sep>']
         data_sent_ids.extend(sent_ids)

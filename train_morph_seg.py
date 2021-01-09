@@ -22,19 +22,12 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+
 # Data
-raw_root_path = Path('data/raw/UD_Hebrew')
-partition = tb.ud(raw_root_path, 'HTB')
-# partition = ['train', 'dev', 'test']
-logging.info('Loading vocabularies')
-processed_root_path = Path('data/preprocessed/UD_Hebrew/HTB')
-char_vectors, char_vocab = preprocess_morph_seg.load_char_vocab(processed_root_path)
-
-
 def load_dataset_samples():
     logging.info('Loading data')
-    token_data = preprocess_morph_seg.load_token_data(processed_root_path, partition)
-    seg_data = preprocess_morph_seg.load_morph_seg_data(processed_root_path, partition)
+    token_data = preprocess_morph_seg.load_token_data(preprocessed_root_path, partition)
+    seg_data = preprocess_morph_seg.load_morph_seg_data(preprocessed_root_path, partition)
     tensor_datasets = {}
     for part in partition:
         token_arr, token_char_arr = token_data[part]
@@ -50,7 +43,7 @@ def load_dataset_samples():
 def save_tensor_data(tensor_dataset):
     for part in tensor_dataset:
         ds = tensor_dataset[part]
-        tensor_data_file_path = processed_root_path / f'{part}_data_samples.pt'
+        tensor_data_file_path = preprocessed_root_path / f'{part}_data_samples.pt'
         logging.info(f'Saving tensor dataset to file {tensor_data_file_path}')
         torch.save(ds, tensor_data_file_path)
 
@@ -58,15 +51,25 @@ def save_tensor_data(tensor_dataset):
 def load_tensor_data():
     tensor_datasets = {}
     for part in partition:
-        tensor_data_file_path = processed_root_path / f'{part}_data_samples.pt'
+        tensor_data_file_path = preprocessed_root_path / f'{part}_data_samples.pt'
         logging.info(f'Loading tensor dataset from file {tensor_data_file_path}')
         ds = torch.load(tensor_data_file_path)
         tensor_datasets[part] = ds
     return tensor_datasets
 
 
+raw_root_path = Path('data/raw/UD_Hebrew')
+# raw_root_path = Path('data/raw/HebrewTreebank')
+partition = tb.ud(raw_root_path, 'HTB')
+# partition = tb.spmrl(raw_root_path, 'hebtb')
+
+bert_version = 'bert-distilled-wordpiece-oscar-52000'
+preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{bert_version}')
+# preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{bert_version}')
+char_vectors, char_vocab = preprocess_morph_seg.load_char_vocab(preprocessed_root_path)
+
 # Dataset Partition
-tensor_data_files = [processed_root_path / f'{part}_data_samples.pt' for part in partition]
+tensor_data_files = [preprocessed_root_path / f'{part}_data_samples.pt' for part in partition]
 if all([f.exists() for f in tensor_data_files]):
     tensor_datasets = load_tensor_data()
 else:
@@ -83,15 +86,15 @@ bert = BertModel.from_pretrained(str(bert_folder_path))
 bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
 logging.info('BERT model and tokenizer loaded')
 
-# Model
+# Morph Segmentation Model
 char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float), freeze=False,
                                         padding_idx=char_vocab['char2index']['<pad>'])
-num_layers = 1
+num_layers = 2
 hidden_size = bert.config.hidden_size // num_layers
-enc_dropout = 0.0
-dec_dropout = 0.0
+enc_dropout = 0.1
+dec_dropout = 0.1
 char_size = len(char_vocab['char2index'])
-out_dropout = 0.0
+out_dropout = 0.5
 token_tag_model = TokenCharMorphModel(char_emb=char_emb, hidden_size=hidden_size, num_layers=num_layers,
                                       enc_dropout=enc_dropout, dec_dropout=dec_dropout, out_size=char_size,
                                       out_dropout=out_dropout)
@@ -100,20 +103,6 @@ device = None
 if device is not None:
     morph_model.to(device)
 print(morph_model)
-
-# Optimization
-epochs = 3
-max_grad_norm = 1.0
-lr = 1e-3
-# freeze bert
-for param in bert.parameters():
-    param.requires_grad = False
-parameters = list(filter(lambda p: p.requires_grad, morph_model.parameters()))
-# parameters = morph_model.parameters()
-adam = optim.AdamW(parameters, lr=lr)
-# char_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=char_vocab['char2index']['<pad>'])
-char_loss_fct = nn.CrossEntropyLoss(ignore_index=0)
-teacher_forcing_ratio = 1.0
 
 # Special symbols
 sos = torch.tensor([char_vocab['char2index']['<s>']], dtype=torch.long, device=device)
@@ -137,15 +126,14 @@ def to_sent_tokens(sent_token_chars):
 def to_sent_token_segments(sent_token_morph_chars):
     tokens = []
     token_mask = torch.nonzero(torch.eq(sent_token_morph_chars, eos))
-    token_mask = {m[0].item(): m[1].item() for m in reversed(token_mask)}
+    token_mask_map = {m[0].item(): m[1].item() for m in token_mask}
     for i, token_chars in enumerate(sent_token_morph_chars):
-        token_len = token_mask[i] if i in token_mask else sent_token_morph_chars.shape[1]
+        token_len = token_mask_map[i] if i in token_mask_map else sent_token_morph_chars.shape[1]
         token_chars = token_chars[:token_len]
         form_mask = torch.nonzero(torch.eq(token_chars, sep))
         forms = []
         start_pos = 0
-        for m in form_mask:
-            to_pos = m
+        for to_pos in form_mask:
             form_chars = token_chars[start_pos:to_pos]
             form = ''.join([char_vocab['index2char'][c.item()] for c in form_chars])
             forms.append(form)
@@ -203,7 +191,7 @@ def get_morph_seg_lattice_data(sent_token_seg_rows):
 
 
 def print_eval_scores(decoded_df, truth_df, step):
-    aligned_scores, mset_scores = tb.morph_eval(truth_df, decoded_df, ['form'])
+    aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=['form'])
     for fs in aligned_scores:
         p, r, f = aligned_scores[fs]
         print(f'eval {step} aligned {fs}: [P: {p}, R: {r}, F: {f}]')
@@ -245,7 +233,7 @@ def process(epoch, phase, print_every, model, data, teacher_forcing_ratio, char_
         decoded_segments = to_sent_token_segments(decoded_chars.view(-1, max_form_len))
         print_decoded_sent_tokens.append(decoded_segments)
         decoded_token_lattice_rows = (sent_id, sent_tokens, decoded_segments)
-        print_decoded_token_lattice_rows.extend(decoded_token_lattice_rows)
+        print_decoded_token_lattice_rows.append(decoded_token_lattice_rows)
 
         if optimizer is not None:
             form_char_loss.backward()
@@ -271,7 +259,8 @@ def process(epoch, phase, print_every, model, data, teacher_forcing_ratio, char_
             print_decoded_token_lattice_rows = []
     if print_form_char_loss > 0:
         total_form_char_loss += print_form_char_loss
-    if len(print_decoded_token_lattice_rows) > 0:
+        total_target_sent_tokens.extend(print_target_sent_tokens)
+        total_decoded_sent_tokens.extend(print_decoded_sent_tokens)
         total_decoded_token_lattice_rows.extend(print_decoded_token_lattice_rows)
     print(f'epoch {epoch} {phase}, total form char loss: {total_form_char_loss / len(data)}')
     aligned_scores, mset_scores = morph_eval(total_decoded_sent_tokens, total_target_sent_tokens)
@@ -279,6 +268,33 @@ def process(epoch, phase, print_every, model, data, teacher_forcing_ratio, char_
     print(mset_scores)
     return get_morph_seg_lattice_data(total_decoded_token_lattice_rows)
 
+
+# Optimization
+epochs = 1
+max_grad_norm = 1.0
+lr = 1e-3
+# freeze bert
+for param in bert.parameters():
+    param.requires_grad = False
+parameters = list(filter(lambda p: p.requires_grad, morph_model.parameters()))
+# parameters = morph_model.parameters()
+adam = optim.AdamW(parameters, lr=lr)
+# char_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=char_vocab['char2index']['<pad>'])
+char_loss_fct = nn.CrossEntropyLoss(ignore_index=0)
+teacher_forcing_ratio = 1.0
+
+
+# Output location
+out_path = Path(f'experiments/morph-seg/bert/distilled/wordpiece/{bert_version}/UD_Hebrew/HTB')
+# out_path = Path(f'experiments/morph-seg/bert/distilled/wordpiece/{bert_version}/HebrewTreebank/hebtb')
+# out_path.mkdir(parents=True, exist_ok=True)
+m = torch.load(out_path / 'model.pt', map_location=torch.device('cpu'))
+m.eval()
+with torch.no_grad():
+    dev_samples = process(0, 'dev', 100, m, dev_dataloader, 0.0, char_loss_fct)
+    print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], step=0)
+    test_samples = process(m, 'test', 100, m, test_dataloader, 0.0, char_loss_fct)
+    print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], step=0)
 
 # Training epochs
 for i in trange(epochs, desc="Epoch"):
@@ -288,6 +304,10 @@ for i in trange(epochs, desc="Epoch"):
     morph_model.eval()
     with torch.no_grad():
         dev_samples = process(epoch, 'dev', 10, morph_model, dev_dataloader, 0.0, char_loss_fct)
-        print_eval_scores(dev_samples, partition['dev'], epoch)
+        print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], step=epoch)
         test_samples = process(epoch, 'test', 10, morph_model, test_dataloader, 0.0, char_loss_fct)
-        print_eval_scores(test_samples, partition['test'], epoch)
+        print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], step=epoch)
+# dev_samples.to_csv(out_path / 'dev.lattices.csv', index=False)
+# test_samples.to_csv(out_path / 'test.lattices.csv', index=False)
+# torch.save(morph_model.state_dict(), out_path / 'model-state.pt')
+# torch.save(morph_model, out_path / 'model.pt')
