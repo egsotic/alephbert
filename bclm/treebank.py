@@ -18,13 +18,14 @@ def save_lattice_as_ner_format(input_lattice_file_path, output_ner_file_path):
             f.write('\n')
 
 
-def spmrl_conllu_ner(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
+def spmrl_ner_conllu(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
+    logging.info('SPMRL NER conllu')
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
     if tb_root_path is not None:
         data_tb_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f'loading treebank: {tb_root_path}')
+        logging.info(f'Loading treebank: {tb_root_path}')
         partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
         for part in partition:
             df = partition[part]
@@ -38,72 +39,75 @@ def spmrl_conllu_ner(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name
             df['tag'] = ner
             df['feats'] = tag_feats
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
-            logging.info(f'saving: {lattice_file_path}')
+            logging.info(f'Saving: {lattice_file_path}')
             df.to_csv(lattice_file_path)
     else:
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
-            logging.info(f'loading: {lattice_file_path}')
+            logging.info(f'Loading: {lattice_file_path}')
             partition[part] = pd.read_csv(lattice_file_path, index_col=0)
     return partition
 
 
 def spmrl_conllu(data_root_path, tb_name, tb_root_path=None, ma_name=None):
+    logging.info('SPMRL conllu')
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
     if tb_root_path is not None:
         data_tb_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f'loading treebank: {tb_root_path}')
+        logging.info(f'Loading treebank: {tb_root_path}')
         partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
-            logging.info(f'saving: {lattice_file_path}')
+            logging.info(f'Saving: {lattice_file_path}')
             partition[part].to_csv(lattice_file_path)
     else:
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
-            logging.info(f'loading: {lattice_file_path}')
+            logging.info(f'Loading: {lattice_file_path}')
             partition[part] = pd.read_csv(lattice_file_path, index_col=0)
     return partition
 
 
 def spmrl(data_root_path, tb_name, tb_root_path=None, ma_name=None):
+    logging.info('SPMRL lattices')
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
     if tb_root_path is not None:
         data_tb_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f'loading treebank: {tb_root_path}')
+        logging.info(f'Loading treebank: {tb_root_path}')
         partition = conllx.load_conllx(tb_root_path, partition, tb_name, ma_name)
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
-            logging.info(f'saving: {lattice_file_path}')
+            logging.info(f'Saving: {lattice_file_path}')
             partition[part].to_csv(lattice_file_path)
     else:
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
-            logging.info(f'loading: {lattice_file_path}')
+            logging.info(f'Loading: {lattice_file_path}')
             partition[part] = pd.read_csv(lattice_file_path, index_col=0)
     return partition
 
 
 def ud(data_root_path, tb_name, tb_root_path=None, ma_name=None):
+    logging.info('UD lattices')
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
     data_tb_path = Path(data_root_path) / tb_name / ma_type
     if tb_root_path is not None:
         data_tb_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f'loading treebank: {tb_root_path}')
+        logging.info(f'Loading treebank: {tb_root_path}')
         partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
-            logging.info(f'saving: {lattice_file_path}')
+            logging.info(f'Saving: {lattice_file_path}')
             partition[part].to_csv(lattice_file_path)
     else:
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
-            logging.info(f'loading: {lattice_file_path}')
+            logging.info(f'Loading: {lattice_file_path}')
             partition[part] = pd.read_csv(lattice_file_path, index_col=0)
     return partition
 

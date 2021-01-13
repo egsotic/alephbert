@@ -719,7 +719,7 @@ if __name__ == '__main__':
     bert_tokenizer = AutoTokenizer.from_pretrained("./experiments/transformers/bert-wordpiece-v1")
     logging.info(f'{type(bert_tokenizer).__name__} loaded')
     # partition = tb.spmrl('data/raw/HebrewTreebank')
-    partition = tb.spmrl_conllu_ner('data/raw/for_amit_spmrl')
+    partition = tb.spmrl_ner_conllu('data/raw/for_amit_spmrl')
     # partition = {k: v for k, v in partition.items() if k in ['dev', 'test']}
     # _save_emb(partition)
     char_vectors, char2index = _load_char_emb()

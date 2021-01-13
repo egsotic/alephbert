@@ -16,7 +16,7 @@ def add_chars(df: pd.DataFrame, field_name):
 
 def _create_xtoken_df(morph_df: pd.DataFrame, xtokenizer: BertTokenizerFast):
     token_df = morph_df[['sent_id', 'token_id', 'token']].drop_duplicates()
-    sent_groups = list(token_df.groupby([token_df.sent_id]))
+    sent_groups = sorted(token_df.groupby([token_df.sent_id]))
     num_sentences = len(sent_groups)
     tq = tqdm(total=num_sentences, desc="Sentence")
     data_rows = []
@@ -38,7 +38,7 @@ def _create_token_char_df(morph_df: pd.DataFrame):
 
 
 def _collate_xtoken_data_samples(xtoken_df: pd.DataFrame, xtokenizer: BertTokenizerFast):
-    sent_groups = list(xtoken_df.groupby(xtoken_df.sent_id))
+    sent_groups = xtoken_df.groupby(xtoken_df.sent_id)
     num_sentences = len(sent_groups)
     max_sent_len = max([len(sent_df) for sent_id, sent_df in sent_groups])
     data_rows = []
@@ -62,7 +62,7 @@ def _collate_xtoken_data_samples(xtoken_df: pd.DataFrame, xtokenizer: BertTokeni
 
 
 def _collate_token_char_data_samples(token_char_df: pd.DataFrame, char2index: dict):
-    sent_groups = list(token_char_df.groupby(token_char_df.sent_id))
+    sent_groups = sorted(token_char_df.groupby(token_char_df.sent_id))
     num_sentences = len(sent_groups)
     max_sent_len = max([len(sent_df) for sent_id, sent_df in sent_groups])
     data_rows = []
@@ -98,7 +98,7 @@ def save_char_vocab(data_path: Path, ft_root_path: Path, raw_partition: dict):
 
 
 def load_char_vocab(data_path: Path):
-    logging.info(f'loading char embedding')
+    logging.info(f'Loading char embedding')
     char_vectors, char2index = ft.load_word_vectors(data_path / 'ft_char.vec.txt')
     index2char = {char2index[c]: c for c in char2index}
     char_vocab = {'char2index': char2index, 'index2char': index2char}
@@ -171,7 +171,7 @@ def save_token_char_data_samples(data_path: Path, token_partition: dict, char2in
     return token_char_samples_partition
 
 
-def load_token_char_data_samples(data_path: Path, partition: list):
+def _load_token_char_data_samples(data_path: Path, partition: list):
     token_char_samples_partition = {}
     for part in partition:
         token_char_samples_file = data_path / f'{part}_token_char_data_samples.csv'
@@ -183,17 +183,17 @@ def load_token_char_data_samples(data_path: Path, partition: list):
 
 def load_token_data(data_path: Path, partition: list):
     xtoken_data_samples = load_xtoken_data_samples(data_path, partition)
-    token_char_data_samples = load_token_char_data_samples(data_path, partition)
+    token_char_data_samples = _load_token_char_data_samples(data_path, partition)
     arr_data = {}
     for part in partition:
         xtoken_df = xtoken_data_samples[part]
         token_data = xtoken_df[['sent_idx', 'token_idx', 'xtoken_id']]
-        token_data_groups = token_data.groupby('sent_idx')
+        token_data_groups = sorted(token_data.groupby('sent_idx'))
         token_arr = np.stack([sent_df.to_numpy() for sent_id, sent_df in token_data_groups], axis=0)
 
         token_char_df = token_char_data_samples[part]
         token_char_data = token_char_df[['sent_idx', 'token_idx', 'char_id']]
-        token_char_data_groups = token_char_data.groupby('sent_idx')
+        token_char_data_groups = sorted(token_char_data.groupby('sent_idx'))
         token_char_arr = np.stack([sent_df.to_numpy() for sent_id, sent_df in token_char_data_groups], axis=0)
 
         arr_data[part] = (token_arr, token_char_arr)
