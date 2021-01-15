@@ -2,6 +2,8 @@ from collections import defaultdict
 from itertools import islice
 import pandas as pd
 from functools import lru_cache
+import sys
+
 
 def fix_multi_biose(tag, multi_delim='^'):
     parts = [x[0] for x in tag.split('^')]
@@ -49,7 +51,7 @@ def evaluate_files(gold_path, pred_path, fix_multi_tag_pred=True, truncate=None,
     pred_sents = read_file_sents(pred_path)
     gold_mentions = sents_to_mentions(gold_sents, truncate=truncate, ignore_cat=ignore_cat, str_join_char=str_join_char)
     pred_mentions = sents_to_mentions(pred_sents, truncate=truncate, ignore_cat=ignore_cat, str_join_char=str_join_char)
-    return evaluate_mentions(gold_mentions, pred_mentions, verbose=False)
+    return evaluate_mentions(gold_mentions, pred_mentions, verbose=True)
 
 
 def evaluate_mentions(true_ments, pred_ments, examples=5, verbose=True, return_tpc=False):
@@ -168,3 +170,7 @@ def get_sents_with_pred_tags(splits, preds, truncate=80):
         spl_preds = pd.Series(spl_preds, index=test_sents.index)
         sents_preds.append(spl_preds)
     return sents_preds
+
+
+if __name__ == '__main__':
+    evaluate_files(sys.argv[1], sys.argv[2])

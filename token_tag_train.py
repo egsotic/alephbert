@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers.models.bert import BertTokenizerFast, BertModel
 from data import preprocess_morph_tag
-from tag_model import TaggerModel, TokenTagsDecoder
+from token_tag_model import TaggerModel, TokenTagsDecoder
 from collections import Counter
 import pandas as pd
 from bclm import treebank as tb
@@ -21,14 +21,33 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-raw_root_path = Path('data/raw/for_amit_spmrl')
-partition = tb.ud(raw_root_path, 'hebtb')
+schema = "UD"
+# schema = "SPMRL"
+data_src = "UD_Hebrew"
+# data_src = "HebrewTreebank"
+# data_src = "for_amit_spmrl"
+tb_name = "HTB"
+# tb_name = "hebtb"
+raw_root_path = Path(f'data/raw/{data_src}')
+
+# Data
+if tb_name == 'HTB':
+    partition = tb.ud(raw_root_path, tb_name)
+elif tb_name == 'hebtb':
+    partition = tb.spmrl(raw_root_path, tb_name)
+else:
+    partition = {'train': None, 'dev': None, 'test': None}
 bert_version = 'bert-distilled-wordpiece-oscar-52000'
-preprocessed_data_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{bert_version}')
+preprocessed_data_root_path = Path(f'data/preprocessed/{data_src}/{tb_name}/{bert_version}')
+
+# raw_root_path = Path('data/raw/UD_Hebrew')
+# partition = tb.ud(raw_root_path, 'HTB')
+# bert_version = 'bert-distilled-wordpiece-oscar-52000'
+# preprocessed_data_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{bert_version}')
 
 
 def load_preprocessed_data_samples(data_root_path, partition):
-    logging.info('Loading preprocessed SPMRL NER data samples')
+    logging.info(f'Loading preprocessed {schema} tag data samples')
     token_data = preprocess_morph_tag.load_token_data(data_root_path, partition)
     tag_data = preprocess_morph_tag.load_morph_tag_data(data_root_path, partition)
     datasets = {}
@@ -43,17 +62,17 @@ def load_preprocessed_data_samples(data_root_path, partition):
 
 
 datasets = {}
-data_samples_file_paths = {part: preprocessed_data_root_path / f'{part}_spmrl_ner_data_samples.pt' for part in partition}
+data_samples_file_paths = {part: preprocessed_data_root_path / f'{part}_tag_data_samples.pt' for part in partition}
 if all([data_samples_file_paths[part].exists() for part in data_samples_file_paths]):
     for part in partition:
         file_path = data_samples_file_paths[part]
-        logging.info(f'Loading SPMRL NER tensor dataset to file {file_path}')
+        logging.info(f'Loading {schema} tag tensor dataset to file {file_path}')
         datasets[part] = torch.load(file_path)
 else:
     datasets = load_preprocessed_data_samples(preprocessed_data_root_path, partition)
     for part in datasets:
         file_path = data_samples_file_paths[part]
-        logging.info(f'Saving SPMRL NER tensor dataset to file {file_path}')
+        logging.info(f'Saving {schema} tag tensor dataset to file {file_path}')
         torch.save(datasets[part], file_path)
 
 train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=False)
@@ -108,16 +127,16 @@ def morph_eval(decoded_sent_tokens, target_sent_tokens):
     aligned_decoded_counts, aligned_target_counts, aligned_intersection_counts = 0, 0, 0
     mset_decoded_counts, mset_target_counts, mset_intersection_counts = 0, 0, 0
     for decoded_tokens, target_tokens in zip(decoded_sent_tokens, target_sent_tokens):
-        for decoded_tags, target_tags in zip(decoded_tokens, target_tokens):
-            decoded_tag_counts, target_tag_counts = Counter(decoded_tags), Counter(target_tags)
-            intersection_tag_counts = decoded_tag_counts & target_tag_counts
-            mset_decoded_counts += sum(decoded_tag_counts.values())
-            mset_target_counts += sum(target_tag_counts.values())
-            mset_intersection_counts += sum(intersection_tag_counts.values())
-            aligned_tags = [d for d, t in zip(decoded_tags, target_tags) if d == t]
-            aligned_decoded_counts += len(decoded_tags)
-            aligned_target_counts += len(target_tags)
-            aligned_intersection_counts += len(aligned_tags)
+        for decoded_segments, target_segments in zip(decoded_tokens, target_tokens):
+            decoded_segment_counts, target_segment_counts = Counter(decoded_segments), Counter(target_segments)
+            intersection_segment_counts = decoded_segment_counts & target_segment_counts
+            mset_decoded_counts += sum(decoded_segment_counts.values())
+            mset_target_counts += sum(target_segment_counts.values())
+            mset_intersection_counts += sum(intersection_segment_counts.values())
+            aligned_segments = [d for d, t in zip(decoded_segments, target_segments) if d == t]
+            aligned_decoded_counts += len(decoded_segments)
+            aligned_target_counts += len(target_segments)
+            aligned_intersection_counts += len(aligned_segments)
     precision = aligned_intersection_counts / aligned_decoded_counts if aligned_decoded_counts else 0.0
     recall = aligned_intersection_counts / aligned_target_counts if aligned_target_counts else 0.0
     f1 = 2.0 * (precision * recall) / (precision + recall) if precision + recall else 0.0
@@ -170,7 +189,8 @@ def print_eval_scores(decoded_df, truth_df, step):
 
 
 # Training and evaluation routine
-def process(epoch, phase, print_every, model, data, teacher_forcing_ratio, tag_criterion, optimizer=None, max_grad_norm=None):
+def process(model: TaggerModel, data: DataLoader, criterion: nn.CrossEntropyLoss, epoch, phase, print_every,
+            teacher_forcing_ratio=0.0, optimizer=None, max_grad_norm=None):
     print_tag_loss, total_tag_loss = 0, 0
     print_decoded_sent_tokens, total_decoded_sent_tokens = [], []
     print_target_sent_tokens, total_target_sent_tokens = [], []
@@ -180,19 +200,25 @@ def process(epoch, phase, print_every, model, data, teacher_forcing_ratio, tag_c
         batch = tuple(t.to(device) for t in batch)
         xtokens, token_chars, tags = batch
         input_xtokens = xtokens[:, :, 1:]
+        input_token_chars = token_chars[token_chars[:, :, 0] > 0]
         target_token_tags = tags[:, :, :, 1:]
+        target_tags = target_token_tags[target_token_tags[:, :, :, 0] > 0]
+
         max_tag_len = target_token_tags.shape[2]
 
         sent_id = tags[:, :, :, 0].unique().item()
-        sent_tokens = to_sent_tokens(token_chars[0])
-        target_tags = target_token_tags[target_token_tags[:, :, :, 0] > 0]
-        target_tags = to_sent_token_tags(target_tags[:, 1].view(-1, max_tag_len))
-        print_target_sent_tokens.append(target_tags)
+        sent_tokens = to_sent_tokens(input_token_chars)
+
+        # target_tags = to_sent_token_tags(target_tags[:, 1].view(-1, max_tag_len))
+        sent_token_tags = to_sent_token_tags(target_tags)
+        print_target_sent_tokens.append(sent_token_tags)
 
         use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-        num_tokens, tag_scores = model(input_xtokens, special_symbols, max_tag_len, target_token_tags if use_teacher_forcing else None)
+        # num_tokens, tag_scores = model(input_xtokens, special_symbols, max_tag_len, target_token_tags if use_teacher_forcing else None)
+        num_tokens, tag_scores = model(input_xtokens, special_symbols, max_tag_len,
+                                       target_tags if use_teacher_forcing else None)
         target_tags = target_token_tags[:, :num_tokens, :, 1].view(-1)
-        tag_loss = tag_criterion(tag_scores.squeeze(0), target_tags.squeeze(0))
+        tag_loss = criterion(tag_scores.squeeze(0), target_tags.squeeze(0))
         print_tag_loss += tag_loss
 
         decoded_tags = model.decode(tag_scores).squeeze(0)
@@ -210,7 +236,8 @@ def process(epoch, phase, print_every, model, data, teacher_forcing_ratio, tag_c
 
         if (i + 1) % print_every == 0:
             print(f'epoch {epoch} {phase}, step {i + 1} tag loss: {print_tag_loss / print_every}')
-            print(decoded_tags)
+            print(f'sent #{sent_id} tokens: {sent_tokens}')
+            print(f'sent #{sent_id} tags  : {decoded_tags}')
             total_tag_loss += print_tag_loss
             print_tag_loss = 0
 
@@ -246,7 +273,7 @@ parameters = list(filter(lambda p: p.requires_grad, tagger_model.parameters()))
 # parameters = morph_model.parameters()
 adam = optim.AdamW(parameters, lr=lr)
 # char_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=char_vocab['char2index']['<pad>'])
-char_loss_fct = nn.CrossEntropyLoss(ignore_index=0)
+loss_fct = nn.CrossEntropyLoss(ignore_index=0)
 teacher_forcing_ratio = 1.0
 
 
@@ -254,10 +281,10 @@ teacher_forcing_ratio = 1.0
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
     tagger_model.train()
-    process(epoch, 'train', 10, tagger_model, train_dataloader, teacher_forcing_ratio, char_loss_fct, adam, max_grad_norm)
+    process(tagger_model, train_dataloader, loss_fct, epoch, 'train', 10, teacher_forcing_ratio, adam, max_grad_norm)
     tagger_model.eval()
     with torch.no_grad():
-        dev_samples = process(epoch, 'dev', 10, tagger_model, dev_dataloader, 0.0, char_loss_fct)
+        dev_samples = process(tagger_model, dev_dataloader, loss_fct, epoch, 'dev', 10)
         print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], step=epoch)
-        test_samples = process(epoch, 'test', 10, tagger_model, test_dataloader, 0.0, char_loss_fct)
+        test_samples = process(tagger_model, test_dataloader, loss_fct, epoch, 'test', 10)
         print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], step=epoch)

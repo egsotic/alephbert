@@ -50,9 +50,9 @@ def _collate_xtoken_data_samples(xtoken_df: pd.DataFrame, xtokenizer: BertTokeni
         xtokens = list(sent_df.xtoken)
         xtoken_ids = xtokenizer.convert_tokens_to_ids(xtokens)
         pad_len = max_sent_len - len(sent_idxs)
-        sent_idxs.extend([sent_id] * pad_len)
+        sent_idxs.extend(sent_idxs[-1:] * pad_len)
         tokens.extend(['<pad>'] * pad_len)
-        token_idxs.extend([-1] * pad_len)
+        token_idxs.extend(token_idxs[-1:] * pad_len)
         xtokens.extend([xtokenizer.pad_token] * pad_len)
         xtoken_ids.extend([xtokenizer.pad_token_id] * pad_len)
         data_rows.extend(list(row) for row in zip(sent_idxs, token_idxs, tokens, xtokens, xtoken_ids))
@@ -74,9 +74,9 @@ def _collate_token_char_data_samples(token_char_df: pd.DataFrame, char2index: di
         chars = list(sent_df.char)
         char_ids = [char2index[c] for c in chars]
         pad_len = max_sent_len - len(sent_idxs)
-        sent_idxs.extend([sent_id] * pad_len)
+        sent_idxs.extend(sent_idxs[-1:] * pad_len)
         tokens.extend(['<pad>'] * pad_len)
-        token_idxs.extend([-1] * pad_len)
+        token_idxs.extend(token_idxs[-1:] * pad_len)
         chars.extend(['<pad>'] * pad_len)
         char_ids.extend([char2index['<pad>']] * pad_len)
         data_rows.extend(list(row) for row in zip(sent_idxs, token_idxs, tokens, chars, char_ids))
@@ -181,20 +181,58 @@ def _load_token_char_data_samples(data_path: Path, partition: list):
     return token_char_samples_partition
 
 
-def load_token_data(data_path: Path, partition: list):
+def to_token_chars(token_char_data_samples: dict):
+    arr_data = {}
+    for part in token_char_data_samples:
+        token_char_df = token_char_data_samples[part]
+        token_char_data = token_char_df[['sent_idx', 'token_idx', 'char_id']]
+        token_data_groups = token_char_data.groupby('sent_idx')
+        sent_arrs = []
+        for sent_idx, sent_df in sorted(token_data_groups):
+            sent_token_data_groups = sent_df.groupby('token_idx')
+            sent_arrs.append([sent_token_df.to_numpy() for token_id, sent_token_df in sorted(sent_token_data_groups)
+                              if token_id > 0])
+        num_chars = [[len(arr) for arr in sent_token_arrs] for sent_token_arrs in sent_arrs]
+        max_num_chars = max([n for token_num_chars in num_chars for n in token_num_chars])
+        char_lengths = [[max_num_chars - n for n in token_num_chars] for token_num_chars in num_chars]
+        char_arrs = []
+        for sent_token_arrs, sent_token_char_lengths in zip(sent_arrs, char_lengths):
+            sent_char_arrs = []
+            for sent_token_arr, sent_token_len in zip(sent_token_arrs, sent_token_char_lengths):
+                if sent_token_len > 0:
+                    sent_id = sent_token_arr[0, 0].item()
+                    token_id = sent_token_arr[0, 1].item()
+                    pad_arr = np.array([[sent_id, token_id, 0]] * sent_token_len)
+                    sent_char_arrs.append(np.concatenate([sent_token_arr, pad_arr]))
+                else:
+                    sent_char_arrs.append(sent_token_arr)
+            char_arrs.append(np.stack(sent_char_arrs, axis=0))
+        num_tokens = [len(arrs) for arrs in char_arrs]
+        max_num_tokens = max(num_tokens)
+        token_lengths = [max_num_tokens - n for n in num_tokens]
+        token_char_arrs = []
+        for arr, length in zip(char_arrs, token_lengths):
+            if length > 0:
+                sent_id = arr[0, 0, 0].item()
+                pad_arr = np.array([[[sent_id, 0, 0]] * arr.shape[1]] * length)
+                token_char_arrs.append(np.concatenate([arr, pad_arr]))
+            else:
+                token_char_arrs.append(arr)
+        arr_data[part] = np.stack(token_char_arrs, axis=0)
+    return arr_data
+
+
+def load_xtoken_data(data_path: Path, partition: list):
     xtoken_data_samples = load_xtoken_data_samples(data_path, partition)
-    token_char_data_samples = _load_token_char_data_samples(data_path, partition)
     arr_data = {}
     for part in partition:
         xtoken_df = xtoken_data_samples[part]
         token_data = xtoken_df[['sent_idx', 'token_idx', 'xtoken_id']]
-        token_data_groups = sorted(token_data.groupby('sent_idx'))
-        token_arr = np.stack([sent_df.to_numpy() for sent_id, sent_df in token_data_groups], axis=0)
-
-        token_char_df = token_char_data_samples[part]
-        token_char_data = token_char_df[['sent_idx', 'token_idx', 'char_id']]
-        token_char_data_groups = sorted(token_char_data.groupby('sent_idx'))
-        token_char_arr = np.stack([sent_df.to_numpy() for sent_id, sent_df in token_char_data_groups], axis=0)
-
-        arr_data[part] = (token_arr, token_char_arr)
+        token_data_groups = token_data.groupby('sent_idx')
+        arr_data[part] = np.stack([sent_df.to_numpy() for sent_id, sent_df in sorted(token_data_groups)], axis=0)
     return arr_data
+
+
+def load_token_char_data(data_path: Path, partition: list):
+    token_char_data_samples = _load_token_char_data_samples(data_path, partition)
+    return to_token_chars(token_char_data_samples)

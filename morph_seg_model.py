@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 
 
-class TokenCharSeq2SeqModel(nn.Module):
+class TokenCharSegmentDecoder(nn.Module):
 
     def __init__(self, char_emb, hidden_size, num_layers, dropout, out_size, out_dropout):
-        super(TokenCharSeq2SeqModel, self).__init__()
+        super(TokenCharSegmentDecoder, self).__init__()
         self.char_emb = char_emb
         self.enc_input_size = self.char_emb.embedding_dim
         self.enc_hidden_size = hidden_size
@@ -33,7 +34,7 @@ class TokenCharSeq2SeqModel(nn.Module):
         self.out = nn.Linear(in_features=self.dec_hidden_size, out_features=self.out_size)
         self.dropout = nn.Dropout(self.out_dropput)
 
-    def forward(self, char_seq, enc_state, sos, eos, max_decode_len, target_char_seq):
+    def forward(self, char_seq, enc_state, sos, eos, max_len, target_char_seq):
         emb_chars = self.char_emb(char_seq).unsqueeze(1)
         enc_state = enc_state.view(1, 1, -1)
         enc_state = torch.split(enc_state, enc_state.shape[2] // self.enc_num_layers, dim=2)
@@ -41,7 +42,8 @@ class TokenCharSeq2SeqModel(nn.Module):
         enc_output, dec_state = self.encoder(emb_chars, enc_state)
         dec_char = sos
         dec_scores = []
-        while len(dec_scores) < max_decode_len:
+        dec_states = []
+        while len(dec_scores) < max_len:
             emb_dec_char = self.char_emb(dec_char).unsqueeze(1)
             dec_output, dec_state = self.decoder(emb_dec_char, dec_state)
             dec_output = self.dropout(dec_output)
@@ -51,11 +53,13 @@ class TokenCharSeq2SeqModel(nn.Module):
             else:
                 dec_char = self.decode(dec_output).squeeze(0)
             dec_scores.append(dec_output)
+            dec_states.append(dec_state.view(1, -1, self.dec_num_layers * dec_state.shape[2]))
             if torch.all(torch.eq(dec_char, eos)):
                 break
-        fill_len = max_decode_len - len(dec_scores)
+        fill_len = max_len - len(dec_scores)
         dec_scores = torch.cat(dec_scores, dim=1)
-        return F.pad(dec_scores, (0, 0, 0, fill_len))
+        dec_states = torch.cat(dec_states, dim=1)
+        return F.pad(dec_scores, (0, 0, 0, fill_len)), F.pad(dec_states, (0, 0, 0, fill_len))
 
     def decode(self, label_scores):
         return torch.argmax(label_scores, dim=2)
@@ -63,13 +67,13 @@ class TokenCharSeq2SeqModel(nn.Module):
 
 class MorphSegModel(nn.Module):
 
-    def __init__(self, xmodel, xtokenizer, token_char_s2s):
+    def __init__(self, xmodel, xtokenizer, segment_decoder):
         super(MorphSegModel, self).__init__()
         self.xmodel = xmodel
         self.xtokenizer = xtokenizer
-        self.token_char_s2s = token_char_s2s
+        self.segment_decoder = segment_decoder
 
-    def forward(self, input_xtokens, input_token_chars, special_symbols, max_form_len, target_token_form_chars=None):
+    def forward(self, input_xtokens, input_token_chars, special_symbols, max_form_len, target_chars=None):
         mask = torch.ne(input_xtokens[:, :, 1], self.xtokenizer.pad_token_id)
         xoutput = self.xmodel(input_xtokens[:, :, 1], attention_mask=mask)
         emb_xtokens = xoutput.last_hidden_state
@@ -78,19 +82,22 @@ class MorphSegModel(nn.Module):
         # token_xtokens = torch.split_with_sizes(input_xtokens[:, :, 1][mask], tuple(xtoken_vals))
         token_emb_xtokens = torch.split_with_sizes(emb_xtokens[mask], tuple(xtoken_vals))
         # token_xcontext = torch.stack([torch.mean(t, dim=0) for t in token_emb_xtokens], dim=0)
-        token_xcontext = {k.item(): v for k, v in zip(xtoken_idxs[1:-1], [torch.mean(t, dim=0) for t in token_emb_xtokens[1:-1]])}
+        token_xcontext = {k.item(): v for k, v in
+                          zip(xtoken_idxs[1:-1], [torch.mean(t, dim=0) for t in token_emb_xtokens[1:-1]])}
         sos, eos = special_symbols['<s>'], special_symbols['</s>']
         scores = []
-        for cur_token_idx in token_xcontext:
-            token_state = token_xcontext[cur_token_idx]
-            token_chars = input_token_chars[input_token_chars[:, :, 0] == cur_token_idx]
-            input_chars = token_chars[:, 1]
-            target_chars = None
-            if target_token_form_chars is not None:
-                target_chars = target_token_form_chars[0, cur_token_idx - 1, :, 1]
-            token_scores = self.token_char_s2s(input_chars, token_state, sos, eos, max_form_len, target_chars)
-            scores.append(token_scores)
-        return len(scores), torch.cat(scores, dim=1)
+        states = []
+        for cur_token_idx in sorted(token_xcontext):
+            cur_token_state = token_xcontext[cur_token_idx]
+            cur_input_chars = input_token_chars[cur_token_idx-1]
+            cur_target_chars = None
+            if target_chars is not None:
+                cur_target_chars = target_chars[cur_token_idx - 1]
+            cur_token_scores, cur_token_states = self.segment_decoder(cur_input_chars, cur_token_state, sos, eos,
+                                                                      max_form_len, cur_target_chars)
+            scores.append(cur_token_scores)
+            states.append(cur_token_states)
+        return torch.cat(scores, dim=0), torch.cat(states, dim=0)
 
     def decode(self, label_scores):
         return torch.argmax(label_scores, dim=2)

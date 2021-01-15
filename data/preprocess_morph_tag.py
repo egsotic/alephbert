@@ -21,8 +21,8 @@ def _collate_morph_tag_data_samples(morph_df: pd.DataFrame, tag2index: dict, inc
         tags = list(token_df.tag)
         tag_ids = [tag2index[t] for t in tags]
         if include_eos:
-            sent_idxs += [sent_idxs[-1]]
-            token_idxs += [token_idxs[-1]]
+            sent_idxs += sent_idxs[-1:]
+            token_idxs += token_idxs[-1:]
             tokens += tokens[-1:]
             morph_idxs += [-1]
             forms += forms[-1:]
@@ -111,11 +111,11 @@ def load_morph_tag_data(data_path: Path, partition: list):
     for part in partition:
         morph_tag_df = morph_tag_data_samples[part]
         morph_tag_data = morph_tag_df[['sent_idx', 'token_idx', 'tag_id']]
-        morph_tag_data_groups = sorted(morph_tag_data.groupby('sent_idx'))
+        morph_tag_data_groups = morph_tag_data.groupby('sent_idx')
         sent_arrs = []
-        for sent_idx, sent_df in morph_tag_data_groups:
-            morph_token_data_groups = sorted(sent_df.groupby('token_idx'))
-            sent_arrs.append([token_df.to_numpy() for token_id, token_df in morph_token_data_groups])
+        for sent_idx, sent_df in sorted(morph_tag_data_groups):
+            morph_token_data_groups = sent_df.groupby('token_idx')
+            sent_arrs.append([token_df.to_numpy() for token_id, token_df in sorted(morph_token_data_groups)])
         token_morph_size = list(set([arr.shape[0] for token_arrs in sent_arrs for arr in token_arrs]))
         token_lengths = [len(arr) for arr in sent_arrs]
         max_num_tokens = max(token_lengths)

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.models.bert import BertTokenizerFast, BertModel
 
 
 class TokenTagsDecoder(nn.Module):
@@ -51,7 +52,7 @@ class TokenTagsDecoder(nn.Module):
 
 class TaggerModel(nn.Module):
 
-    def __init__(self, xmodel, xtokenizer, token_decoder):
+    def __init__(self, xmodel: BertModel, xtokenizer: BertTokenizerFast, token_decoder: TokenTagsDecoder):
         super(TaggerModel, self).__init__()
         self.xmodel = xmodel
         self.xtokenizer = xtokenizer
@@ -77,18 +78,6 @@ class TaggerModel(nn.Module):
             token_scores = self.token_decoder(token_state, sos, eos, max_num_token_tags, target_tags)
             scores.append(token_scores)
         return len(scores), torch.cat(scores, dim=1)
-
-    def decode(self, label_scores):
-        return torch.argmax(label_scores, dim=2)
-
-
-class SegmentTaggerModel(nn.Module):
-
-    def __init__(self):
-        super(SegmentTaggerModel, self).__init__()
-
-    def forward(self, input_xtokens, input_token_form_chars, target_token_tags=None):
-        pass
 
     def decode(self, label_scores):
         return torch.argmax(label_scores, dim=2)

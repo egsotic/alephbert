@@ -15,27 +15,27 @@ if __name__ == '__main__':
     bert_version = 'bert-distilled-wordpiece-oscar-52000'
 
     tb_root_path = Path('/Users/Amit/dev/onlplab')
-    # tb_root_path = tb_root_path / 'UniversalDependencies'
-    tb_root_path = tb_root_path / 'HebrewResources/for_amit_spmrl'
+    tb_root_path = tb_root_path / 'UniversalDependencies'
+    # tb_root_path = tb_root_path / 'HebrewResources/for_amit_spmrl'
     # tb_root_path = tb_root_path / 'HebrewResources/HebrewTreebank'
 
-    # raw_root_path = Path('data/raw/UD_Hebrew')
-    raw_root_path = Path('data/raw/for_amit_spmrl')
+    raw_root_path = Path('data/raw/UD_Hebrew')
+    # raw_root_path = Path('data/raw/for_amit_spmrl')
     # raw_root_path = Path('data/raw/HebrewTreebank')
 
-    # preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{bert_version}')
-    preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{bert_version}')
+    preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{bert_version}')
+    # preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{bert_version}')
     # preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{bert_version}')
     preprocessed_root_path.mkdir(parents=True, exist_ok=True)
 
     if not raw_root_path.exists():
-        # raw_partition = tb.ud(raw_root_path, tb_root_path, tb_name='HTB')
-        raw_partition = tb.spmrl_ner_conllu(raw_root_path, tb_root_path, tb_name='hebtb')
-        # raw_partition = tb.spmrl(raw_root_path, tb_root_path, tb_name='hebtb')
+        raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path)
+        # raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb', tb_root_path)
+        # raw_partition = tb.spmrl(raw_root_path, 'hebtb', tb_root_path)
     else:
-        # raw_partition = tb.ud(raw_root_path, tb_name='HTB')
-        raw_partition = tb.spmrl_ner_conllu(raw_root_path, tb_name='hebtb')
-        # raw_partition = tb.spmrl(raw_root_path, tb_name='hebtb')
+        raw_partition = tb.ud(raw_root_path, 'HTB')
+        # raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb')
+        # raw_partition = tb.spmrl(raw_root_path, 'hebtb')
 
     ft_root_path = Path('/Users/Amit/dev/fastText')
     if bert_version == 'mbert':
