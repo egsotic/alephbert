@@ -4,7 +4,6 @@ from pathlib import Path
 import torch
 import torch.optim as optim
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers.models.bert import BertTokenizerFast, BertModel
@@ -70,7 +69,7 @@ else:
         file_path = data_samples_file_paths[part]
         logging.info(f'Saving {schema} form tensor dataset to file {file_path}')
         torch.save(datasets[part], file_path)
-train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=True)
+train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=False)
 dev_dataloader = DataLoader(datasets['dev'], batch_size=1)
 test_dataloader = DataLoader(datasets['test'], batch_size=1)
 
@@ -99,35 +98,22 @@ if device is not None:
 print(morph_model)
 
 # Special symbols
-sos = torch.tensor([char_vocab['char2index']['<s>']], dtype=torch.long, device=device)
-eos = torch.tensor([char_vocab['char2index']['</s>']], dtype=torch.long, device=device)
-sep = torch.tensor([char_vocab['char2index']['<sep>']], dtype=torch.long, device=device)
-pad = torch.tensor([char_vocab['char2index']['<pad>']], dtype=torch.long, device=device)
-special_symbols = {'<s>': sos, '</s>': eos, '<sep>': sep, '<pad>': pad}
+sos = torch.tensor([char_vocab['char2index']['<s>']], dtype=torch.long)
+eos = torch.tensor([char_vocab['char2index']['</s>']], dtype=torch.long)
+sep = torch.tensor([char_vocab['char2index']['<sep>']], dtype=torch.long)
+pad = torch.tensor([char_vocab['char2index']['<pad>']], dtype=torch.long)
+special_symbols = {'<s>': sos.to(device), '</s>': eos.to(device), '<sep>': sep.to(device), '<pad>': pad.to(device)}
 
 
-def to_sent_tokens1(sent_token_chars):
-    tokens = []
-    for token_id in sent_token_chars[:, 1].unique():
-        if token_id < 0:
-            continue
-        token_chars = sent_token_chars[sent_token_chars[:, 1] == token_id]
-        token = ''.join([char_vocab['index2char'][c] for c in token_chars[:, 2].tolist()])
-        tokens.append(token)
-    return tokens
-
-
-def to_sent_tokens(token_chars, num_tokens):
+def to_sent_tokens(token_chars):
     tokens = []
     for chars in token_chars:
         token = ''.join([char_vocab['index2char'][c] for c in chars[chars > 0].tolist()])
         tokens.append(token)
-        if len(tokens) == num_tokens:
-            break
     return tokens
 
 
-def to_sent_token_segments(sent_token_morph_chars, num_tokens=None):
+def to_sent_token_segments(sent_token_morph_chars):
     tokens = []
     token_mask = torch.nonzero(torch.eq(sent_token_morph_chars, eos))
     token_mask_map = {m[0].item(): m[1].item() for m in token_mask}
@@ -146,8 +132,6 @@ def to_sent_token_segments(sent_token_morph_chars, num_tokens=None):
         form = ''.join([char_vocab['index2char'][c.item()] for c in form_chars])
         forms.append(form)
         tokens.append(forms)
-        if len(tokens) == num_tokens:
-            break
     return tokens
 
 
@@ -215,35 +199,41 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
 
     for i, batch in enumerate(data):
         batch = tuple(t.to(device) for t in batch)
-        xtokens, token_chars, form_chars = batch
-        input_token_chars = token_chars[:, :, :, -1].squeeze(dim=0)
-        target_token_form_chars = form_chars[:, :, :, -1].squeeze(dim=0)
-        max_form_len = target_token_form_chars.shape[1]
-
-        sent_id = form_chars[:, :, :, 0].unique().item()
-        input_num_tokens = len(form_chars[form_chars[:, :, 0, 1] > 0])
-        input_tokens = to_sent_tokens(input_token_chars, input_num_tokens)
-        input_segments = to_sent_token_segments(target_token_form_chars, input_num_tokens)
-        print_target_forms.append(input_segments)
-
-        use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-        form_scores, form_states = model(xtokens, input_token_chars, special_symbols, max_form_len,
-                                         target_token_form_chars if use_teacher_forcing else None)
-        loss = criterion(form_scores.view(-1, form_scores.shape[-1]), target_token_form_chars[:input_num_tokens].view(-1))
-        print_loss += loss
-
-        decoded_chars = model.decode(form_scores)
-        decoded_segments = to_sent_token_segments(decoded_chars, input_num_tokens)
-        print_decoded_forms.append(decoded_segments)
-        decoded_token_lattice_rows = (sent_id, input_tokens, decoded_segments)
-        print_decoded_lattice_rows.append(decoded_token_lattice_rows)
-
+        batch_scores, batch_targets, batch_token_chars, batch_sent_ids = [], [], [], []
+        for sent_token_ctx, sent_token_chars, sent_form_chars in zip(model.embed(batch[0]), batch[1], batch[2]):
+            input_token_chars = sent_token_chars[:, :, -1]
+            num_tokens = len(sent_token_chars[sent_token_chars[:, 0, 1] > 0])
+            target_token_form_chars = sent_form_chars[:, :, -1]
+            max_form_len = target_token_form_chars.shape[1]
+            use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
+            # form_scores, form_states = model(xtokens, input_token_chars, special_symbols, num_tokens, max_form_len,
+            #                                  target_token_form_chars if use_teacher_forcing else None)
+            sent_form_scores = model(sent_token_ctx, input_token_chars, special_symbols, num_tokens, max_form_len,
+                                     target_token_form_chars if use_teacher_forcing else None)
+            batch_scores.append(sent_form_scores)
+            batch_targets.append(target_token_form_chars[:num_tokens])
+            batch_token_chars.append(input_token_chars[:num_tokens])
+            batch_sent_ids.append(sent_form_chars[:, :, 0].unique())
+        loss_batch_scores = torch.cat(batch_scores)
+        loss_batch_targets = torch.cat(batch_targets)
+        loss = criterion(loss_batch_scores.view(-1, loss_batch_scores.shape[-1]), loss_batch_targets.view(-1))
         if optimizer is not None:
             loss.backward()
             if max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
             optimizer.zero_grad()
+        print_loss += loss
+        with torch.no_grad():
+            for sent_form_scores, sent_token_chars, sent_form_targets, sent_id in zip(batch_scores, batch_token_chars, batch_targets, batch_sent_ids):
+                decoded_chars = model.decode(sent_form_scores)
+                decoded_segments = to_sent_token_segments(decoded_chars)
+                print_decoded_forms.append(decoded_segments)
+                input_tokens = to_sent_tokens(sent_token_chars)
+                input_segments = to_sent_token_segments(sent_form_targets)
+                print_target_forms.append(input_segments)
+                decoded_token_lattice_rows = (sent_id, input_tokens, decoded_segments)
+                print_decoded_lattice_rows.append(decoded_token_lattice_rows)
 
         if (i + 1) % print_every == 0:
             print(f'epoch {epoch} {phase}, step {i + 1} form char loss: {print_loss / print_every}')
@@ -285,15 +275,15 @@ parameters = list(filter(lambda p: p.requires_grad, morph_model.parameters()))
 # parameters = morph_model.parameters()
 adam = optim.AdamW(parameters, lr=lr)
 # char_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=char_vocab['char2index']['<pad>'])
-loss_fct = nn.CrossEntropyLoss(ignore_index=0)
+loss_fct = nn.CrossEntropyLoss(ignore_index=0, reduction='mean')
 teacher_forcing_ratio = 1.0
-
+torch.manual_seed(0)
 
 # Training epochs
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
     morph_model.train()
-    process(morph_model, train_dataloader, loss_fct, epoch, 'train', 10, teacher_forcing_ratio, adam, max_grad_norm)
+    process(morph_model, train_dataloader, loss_fct, epoch, 'train', 1, teacher_forcing_ratio, adam, max_grad_norm)
     morph_model.eval()
     with torch.no_grad():
         dev_samples = process(morph_model, dev_dataloader, loss_fct, epoch, 'dev', 100)
