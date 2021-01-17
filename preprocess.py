@@ -55,5 +55,5 @@ if __name__ == '__main__':
 
     xtoken_data_samples = save_xtoken_data_samples(preprocessed_root_path, xtoken_df, bert_tokenizer)
     token_char_data_samples = save_token_char_data_samples(preprocessed_root_path, token_char_data, char_vocab['char2index'])
-    morph_tag_data_samples = save_morph_tag_data_samples(preprocessed_root_path, morph_data, tag_vocab['tag2index'], include_tag_eos)
+    # morph_tag_data_samples = save_morph_tag_data_samples(preprocessed_root_path, morph_data, tag_vocab['tag2index'], include_tag_eos)
     morph_form_char_data_samples = save_morph_form_char_data_samples(preprocessed_root_path, morph_form_char_data, char_vocab['char2index'])

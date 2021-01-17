@@ -63,14 +63,18 @@ def _create_morph_form_char_df(morph_df: pd.DataFrame):
 def _collate_morph_form_char_data_samples(morph_form_char_df: pd.DataFrame, char2index: dict):
     sent_groups = morph_form_char_df.groupby([morph_form_char_df.sent_id])
     num_sentences = len(sent_groups)
-    token_groups = sorted(morph_form_char_df.groupby([morph_form_char_df.sent_id, morph_form_char_df.token_id]))
+    token_groups = morph_form_char_df.groupby([morph_form_char_df.sent_id, morph_form_char_df.token_id])
     max_num_chars = max([len(token_df) for _,  token_df in token_groups])
     data_sent_idx, data_token_idx, data_tokens, data_morph_idx = [], [], [], []
     data_forms, data_chars, data_char_ids = [], [], []
-    num_morphemes = 0
-    prev_sent_id = 1
+    cur_sent_id = None
     tq = tqdm(total=num_sentences, desc="Sentence")
-    for (sent_id, token_id), token_df in token_groups:
+    for (sent_id, token_id), token_df in sorted(token_groups):
+        if cur_sent_id != sent_id:
+            if cur_sent_id is not None:
+                tq.update(1)
+            cur_sent_id = sent_id
+
         sent_idxs = list(token_df.sent_id)
         token_idxs = list(token_df.token_id)
         tokens = list(token_df.token)
@@ -88,11 +92,6 @@ def _collate_morph_form_char_data_samples(morph_form_char_df: pd.DataFrame, char
         chars.extend(['<pad>'] * pad_len)
         char_ids.extend([char2index['<pad>']] * pad_len)
 
-        if sent_id != prev_sent_id:
-            tq.update(1)
-            num_morphemes = 0
-            prev_sent_id = sent_id
-
         data_sent_idx.extend(sent_idxs)
         data_token_idx.extend(token_idxs)
         data_tokens.extend(tokens)
@@ -100,7 +99,6 @@ def _collate_morph_form_char_data_samples(morph_form_char_df: pd.DataFrame, char
         data_forms.extend(forms)
         data_chars.extend(chars)
         data_char_ids.extend(char_ids)
-        num_morphemes += 1
 
     tq.update(1)
     tq.close()

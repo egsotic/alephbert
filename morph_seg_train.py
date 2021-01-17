@@ -74,7 +74,7 @@ dev_dataloader = DataLoader(datasets['dev'], batch_size=1)
 test_dataloader = DataLoader(datasets['test'], batch_size=1)
 
 # Language Model
-bert_folder_path = Path(f'./experiments/transformers/bert/distilled/wordpiece/{bert_version}')
+bert_folder_path = Path(f'./experiments/transformers/bert/distilled/wordpiece/{bert_version}-130')
 logging.info(f'BERT folder path: {str(bert_folder_path)}')
 bert = BertModel.from_pretrained(str(bert_folder_path))
 bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
@@ -135,6 +135,26 @@ def to_sent_token_segments(sent_token_morph_chars):
     return tokens
 
 
+def to_sent_token_seg_lattice_rows(sent_id, tokens, token_segments):
+    rows = []
+    node_id = 0
+    for token_id, (token, forms) in enumerate(zip(tokens, token_segments)):
+        for form in forms:
+            row = [sent_id, node_id, node_id+1, form, '_', '_', '_', token_id+1, token, True]
+            rows.append(row)
+            node_id += 1
+    return rows
+
+
+def get_morph_seg_lattice_data(sent_token_seg_rows):
+    lattice_rows = []
+    for row in sent_token_seg_rows:
+        lattice_rows.extend(to_sent_token_seg_lattice_rows(*row))
+    return pd.DataFrame(lattice_rows,
+                        columns=['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id',
+                                 'token', 'is_gold'])
+
+
 def morph_eval(decoded_sent_tokens, target_sent_tokens):
     aligned_decoded_counts, aligned_target_counts, aligned_intersection_counts = 0, 0, 0
     mset_decoded_counts, mset_target_counts, mset_intersection_counts = 0, 0, 0
@@ -160,26 +180,6 @@ def morph_eval(decoded_sent_tokens, target_sent_tokens):
     return aligned_scores, mset_scores
 
 
-def to_sent_token_seg_lattice_rows(sent_id, tokens, token_segments):
-    rows = []
-    node_id = 0
-    for token_id, (token, forms) in enumerate(zip(tokens, token_segments)):
-        for form in forms:
-            row = [sent_id, node_id, node_id+1, form, '_', '_', '_', token_id+1, token, True]
-            rows.append(row)
-            node_id += 1
-    return rows
-
-
-def get_morph_seg_lattice_data(sent_token_seg_rows):
-    lattice_rows = []
-    for row in sent_token_seg_rows:
-        lattice_rows.extend(to_sent_token_seg_lattice_rows(*row))
-    return pd.DataFrame(lattice_rows,
-                        columns=['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id',
-                                 'token', 'is_gold'])
-
-
 def print_eval_scores(decoded_df, truth_df, step):
     aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=['form'])
     for fs in aligned_scores:
@@ -201,6 +201,7 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
         batch = tuple(t.to(device) for t in batch)
         batch_scores, batch_targets, batch_token_chars, batch_sent_ids = [], [], [], []
         for sent_token_ctx, sent_token_chars, sent_form_chars in zip(model.embed(batch[0]), batch[1], batch[2]):
+            # logger.info(f'sent_token_ctx: {sent_token_ctx}')
             input_token_chars = sent_token_chars[:, :, -1]
             num_tokens = len(sent_token_chars[sent_token_chars[:, 0, 1] > 0])
             target_token_form_chars = sent_form_chars[:, :, -1]
@@ -213,7 +214,7 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
             batch_scores.append(sent_form_scores)
             batch_targets.append(target_token_form_chars[:num_tokens])
             batch_token_chars.append(input_token_chars[:num_tokens])
-            batch_sent_ids.append(sent_form_chars[:, :, 0].unique())
+            batch_sent_ids.append(sent_form_chars[:, :, 0].unique().item())
         loss_batch_scores = torch.cat(batch_scores)
         loss_batch_targets = torch.cat(batch_targets)
         loss = criterion(loss_batch_scores.view(-1, loss_batch_scores.shape[-1]), loss_batch_targets.view(-1))
@@ -224,18 +225,26 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
             optimizer.step()
             optimizer.zero_grad()
         print_loss += loss
+        batch_decoded_segments = []
         with torch.no_grad():
-            for sent_form_scores, sent_token_chars, sent_form_targets, sent_id in zip(batch_scores, batch_token_chars, batch_targets, batch_sent_ids):
+            for sent_form_scores in batch_scores:
                 decoded_chars = model.decode(sent_form_scores)
-                decoded_segments = to_sent_token_segments(decoded_chars)
-                print_decoded_forms.append(decoded_segments)
-                input_tokens = to_sent_tokens(sent_token_chars)
-                input_segments = to_sent_token_segments(sent_form_targets)
-                print_target_forms.append(input_segments)
-                decoded_token_lattice_rows = (sent_id, input_tokens, decoded_segments)
-                print_decoded_lattice_rows.append(decoded_token_lattice_rows)
+                batch_decoded_segments.append(decoded_chars)
+        for sent_id, input_chars, target_chars, decoded_chars in zip(batch_sent_ids, batch_token_chars, batch_targets, batch_decoded_segments):
+            input_chars = input_chars.to('cpu')
+            target_chars = target_chars.to('cpu')
+            decoded_chars = decoded_chars.to('cpu')
+            input_tokens = to_sent_tokens(input_chars)
+            target_segments = to_sent_token_segments(target_chars)
+            decoded_segments = to_sent_token_segments(decoded_chars)
+            decoded_token_lattice_rows = (sent_id, input_tokens, decoded_segments)
+            print_target_forms.append(target_segments)
+            print_decoded_forms.append(decoded_segments)
+            print_decoded_lattice_rows.append(decoded_token_lattice_rows)
 
         if (i + 1) % print_every == 0:
+            sent_id, input_tokens, decoded_segments = print_decoded_lattice_rows[-1]
+            input_segments = print_target_forms[-1]
             print(f'epoch {epoch} {phase}, step {i + 1} form char loss: {print_loss / print_every}')
             print(f'sent #{sent_id} input tokens  : {input_tokens}')
             print(f'sent #{sent_id} target forms  : {list(reversed(input_segments))}')
@@ -277,13 +286,13 @@ adam = optim.AdamW(parameters, lr=lr)
 # char_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=char_vocab['char2index']['<pad>'])
 loss_fct = nn.CrossEntropyLoss(ignore_index=0, reduction='mean')
 teacher_forcing_ratio = 1.0
-torch.manual_seed(0)
+# torch.manual_seed(0)
 
 # Training epochs
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
     morph_model.train()
-    process(morph_model, train_dataloader, loss_fct, epoch, 'train', 1, teacher_forcing_ratio, adam, max_grad_norm)
+    process(morph_model, train_dataloader, loss_fct, epoch, 'train', 100, teacher_forcing_ratio, adam, max_grad_norm)
     morph_model.eval()
     with torch.no_grad():
         dev_samples = process(morph_model, dev_dataloader, loss_fct, epoch, 'dev', 100)

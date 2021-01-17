@@ -52,7 +52,7 @@ def _collate_xtoken_data_samples(xtoken_df: pd.DataFrame, xtokenizer: BertTokeni
         pad_len = max_sent_len - len(sent_idxs)
         sent_idxs.extend(sent_idxs[-1:] * pad_len)
         tokens.extend(['<pad>'] * pad_len)
-        token_idxs.extend(token_idxs[-1:] * pad_len)
+        token_idxs.extend([-1] * pad_len)
         xtokens.extend([xtokenizer.pad_token] * pad_len)
         xtoken_ids.extend([xtokenizer.pad_token_id] * pad_len)
         data_rows.extend(list(row) for row in zip(sent_idxs, token_idxs, tokens, xtokens, xtoken_ids))
@@ -62,27 +62,70 @@ def _collate_xtoken_data_samples(xtoken_df: pd.DataFrame, xtokenizer: BertTokeni
 
 
 def _collate_token_char_data_samples(token_char_df: pd.DataFrame, char2index: dict):
-    sent_groups = sorted(token_char_df.groupby(token_char_df.sent_id))
+    sent_groups = token_char_df.groupby(token_char_df.sent_id)
     num_sentences = len(sent_groups)
-    max_sent_len = max([len(sent_df) for sent_id, sent_df in sent_groups])
-    data_rows = []
+    # max_sent_len = max([len(sent_df) for sent_id, sent_df in sent_groups])
+    token_groups = token_char_df.groupby([token_char_df.sent_id, token_char_df.token_id])
+    max_num_chars = max([len(token_df) for _,  token_df in token_groups])
+    data_sent_idx, data_token_idx, data_tokens = [], [], []
+    data_chars, data_char_ids = [], []
     tq = tqdm(total=num_sentences, desc="Sentence")
-    for sent_id, sent_df in sent_groups:
-        sent_idxs = list(sent_df.sent_id)
-        token_idxs = list(sent_df.token_id)
-        tokens = list(sent_df.token)
-        chars = list(sent_df.char)
+    cur_sent_id = None
+    for (sent_id, token_id), token_df in sorted(token_groups):
+        if cur_sent_id != sent_id:
+            if cur_sent_id is not None:
+                tq.update(1)
+            cur_sent_id = sent_id
+
+        sent_idxs = list(token_df.sent_id)
+        token_idxs = list(token_df.token_id)
+        tokens = list(token_df.token)
+        chars = list(token_df.char)
         char_ids = [char2index[c] for c in chars]
-        pad_len = max_sent_len - len(sent_idxs)
+
+        pad_len = max_num_chars - len(chars)
         sent_idxs.extend(sent_idxs[-1:] * pad_len)
-        tokens.extend(['<pad>'] * pad_len)
         token_idxs.extend(token_idxs[-1:] * pad_len)
+        tokens.extend(tokens[-1:] * pad_len)
         chars.extend(['<pad>'] * pad_len)
         char_ids.extend([char2index['<pad>']] * pad_len)
-        data_rows.extend(list(row) for row in zip(sent_idxs, token_idxs, tokens, chars, char_ids))
-        tq.update(1)
+
+        data_sent_idx.extend(sent_idxs)
+        data_token_idx.extend(token_idxs)
+        data_tokens.extend(tokens)
+        data_chars.extend(chars)
+        data_char_ids.extend(char_ids)
+
+    tq.update(1)
     tq.close()
-    return pd.DataFrame(data_rows, columns=['sent_idx', 'token_idx', 'token', 'char', 'char_id'])
+    morph_char_data = pd.DataFrame(
+        list(zip(data_sent_idx, data_token_idx, data_tokens, data_chars, data_char_ids)),
+        columns=['sent_idx', 'token_idx', 'token', 'char', 'char_id'])
+    return morph_char_data
+
+
+# def _collate_token_char_data_samples(token_char_df: pd.DataFrame, char2index: dict):
+#     sent_groups = token_char_df.groupby(token_char_df.sent_id)
+#     num_sentences = len(sent_groups)
+#     max_sent_len = max([len(sent_df) for sent_id, sent_df in sent_groups])
+#     data_rows = []
+#     tq = tqdm(total=num_sentences, desc="Sentence")
+#     for sent_id, sent_df in sorted(sent_groups):
+#         sent_idxs = list(sent_df.sent_id)
+#         token_idxs = list(sent_df.token_id)
+#         tokens = list(sent_df.token)
+#         chars = list(sent_df.char)
+#         char_ids = [char2index[c] for c in chars]
+#         pad_len = max_sent_len - len(sent_idxs)
+#         sent_idxs.extend(sent_idxs[-1:] * pad_len)
+#         tokens.extend(['<pad>'] * pad_len)
+#         token_idxs.extend(token_idxs[-1:] * pad_len)
+#         chars.extend(['<pad>'] * pad_len)
+#         char_ids.extend([char2index['<pad>']] * pad_len)
+#         data_rows.extend(list(row) for row in zip(sent_idxs, token_idxs, tokens, chars, char_ids))
+#         tq.update(1)
+#     tq.close()
+#     return pd.DataFrame(data_rows, columns=['sent_idx', 'token_idx', 'token', 'char', 'char_id'])
 
 
 def save_char_vocab(data_path: Path, ft_root_path: Path, raw_partition: dict):
@@ -181,7 +224,7 @@ def _load_token_char_data_samples(data_path: Path, partition: list):
     return token_char_samples_partition
 
 
-def to_token_chars(token_char_data_samples: dict):
+def to_token_chars2(token_char_data_samples: dict):
     arr_data = {}
     for part in token_char_data_samples:
         token_char_df = token_char_data_samples[part]
@@ -220,6 +263,35 @@ def to_token_chars(token_char_data_samples: dict):
                 token_char_arrs.append(arr)
         arr_data[part] = np.stack(token_char_arrs, axis=0)
     return arr_data
+
+
+def to_token_chars(token_char_data_samples: dict):
+    data_arrs = {}
+    for part in token_char_data_samples:
+        token_char_df = token_char_data_samples[part]
+        token_char_data = token_char_df[['sent_idx', 'token_idx', 'char_id']]
+        sent_groups = token_char_data.groupby('sent_idx')
+        num_sentences = len(sent_groups)
+        max_num_tokens = token_char_data.token_idx.max()
+        token_groups = token_char_data.groupby(['sent_idx', 'token_idx'])
+        token_lengths = set([len(token_df) for _, token_df in token_groups])
+        if len(token_lengths) != 1:
+            raise Exception(f'malformed token char data samples: len(token_lengths) != 1 ({len(token_lengths)})')
+        token_len = list(token_lengths)[0]
+        tq = tqdm(total=num_sentences, desc="Sentence")
+        sent_arrs = []
+        for sent_id, sent_df in sorted(sent_groups):
+            sent_arr = sent_df.to_numpy().reshape(-1, token_len, 3)
+            sent_num_tokens = sent_df.token_idx.max()
+            pad_len = max_num_tokens - sent_num_tokens
+            if pad_len > 0:
+                pad_arr = np.array([[[sent_id, -1, 0]] * token_len] * pad_len)
+                sent_arr = np.concatenate([sent_arr, pad_arr])
+            sent_arrs.append(sent_arr)
+            tq.update(1)
+        tq.close()
+        data_arrs[part] = np.stack(sent_arrs, axis=0)
+    return data_arrs
 
 
 def load_xtoken_data(data_path: Path, partition: list):
