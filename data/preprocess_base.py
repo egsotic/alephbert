@@ -104,30 +104,6 @@ def _collate_token_char_data_samples(token_char_df: pd.DataFrame, char2index: di
     return morph_char_data
 
 
-# def _collate_token_char_data_samples(token_char_df: pd.DataFrame, char2index: dict):
-#     sent_groups = token_char_df.groupby(token_char_df.sent_id)
-#     num_sentences = len(sent_groups)
-#     max_sent_len = max([len(sent_df) for sent_id, sent_df in sent_groups])
-#     data_rows = []
-#     tq = tqdm(total=num_sentences, desc="Sentence")
-#     for sent_id, sent_df in sorted(sent_groups):
-#         sent_idxs = list(sent_df.sent_id)
-#         token_idxs = list(sent_df.token_id)
-#         tokens = list(sent_df.token)
-#         chars = list(sent_df.char)
-#         char_ids = [char2index[c] for c in chars]
-#         pad_len = max_sent_len - len(sent_idxs)
-#         sent_idxs.extend(sent_idxs[-1:] * pad_len)
-#         tokens.extend(['<pad>'] * pad_len)
-#         token_idxs.extend(token_idxs[-1:] * pad_len)
-#         chars.extend(['<pad>'] * pad_len)
-#         char_ids.extend([char2index['<pad>']] * pad_len)
-#         data_rows.extend(list(row) for row in zip(sent_idxs, token_idxs, tokens, chars, char_ids))
-#         tq.update(1)
-#     tq.close()
-#     return pd.DataFrame(data_rows, columns=['sent_idx', 'token_idx', 'token', 'char', 'char_id'])
-
-
 def save_char_vocab(data_path: Path, ft_root_path: Path, raw_partition: dict):
     logging.info(f'saving char embedding')
     tokens = set(token for part in raw_partition for token in raw_partition[part].token)
@@ -222,47 +198,6 @@ def _load_token_char_data_samples(data_path: Path, partition: list):
         samples_df = pd.read_csv(str(token_char_samples_file), index_col=0)
         token_char_samples_partition[part] = samples_df
     return token_char_samples_partition
-
-
-def to_token_chars2(token_char_data_samples: dict):
-    arr_data = {}
-    for part in token_char_data_samples:
-        token_char_df = token_char_data_samples[part]
-        token_char_data = token_char_df[['sent_idx', 'token_idx', 'char_id']]
-        token_data_groups = token_char_data.groupby('sent_idx')
-        sent_arrs = []
-        for sent_idx, sent_df in sorted(token_data_groups):
-            sent_token_data_groups = sent_df.groupby('token_idx')
-            sent_arrs.append([sent_token_df.to_numpy() for token_id, sent_token_df in sorted(sent_token_data_groups)
-                              if token_id > 0])
-        num_chars = [[len(arr) for arr in sent_token_arrs] for sent_token_arrs in sent_arrs]
-        max_num_chars = max([n for token_num_chars in num_chars for n in token_num_chars])
-        char_lengths = [[max_num_chars - n for n in token_num_chars] for token_num_chars in num_chars]
-        char_arrs = []
-        for sent_token_arrs, sent_token_char_lengths in zip(sent_arrs, char_lengths):
-            sent_char_arrs = []
-            for sent_token_arr, sent_token_len in zip(sent_token_arrs, sent_token_char_lengths):
-                if sent_token_len > 0:
-                    sent_id = sent_token_arr[0, 0].item()
-                    token_id = sent_token_arr[0, 1].item()
-                    pad_arr = np.array([[sent_id, token_id, 0]] * sent_token_len)
-                    sent_char_arrs.append(np.concatenate([sent_token_arr, pad_arr]))
-                else:
-                    sent_char_arrs.append(sent_token_arr)
-            char_arrs.append(np.stack(sent_char_arrs, axis=0))
-        num_tokens = [len(arrs) for arrs in char_arrs]
-        max_num_tokens = max(num_tokens)
-        token_lengths = [max_num_tokens - n for n in num_tokens]
-        token_char_arrs = []
-        for arr, length in zip(char_arrs, token_lengths):
-            if length > 0:
-                sent_id = arr[0, 0, 0].item()
-                pad_arr = np.array([[[sent_id, 0, 0]] * arr.shape[1]] * length)
-                token_char_arrs.append(np.concatenate([arr, pad_arr]))
-            else:
-                token_char_arrs.append(arr)
-        arr_data[part] = np.stack(token_char_arrs, axis=0)
-    return arr_data
 
 
 def to_token_chars(token_char_data_samples: dict):

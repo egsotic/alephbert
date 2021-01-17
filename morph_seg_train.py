@@ -6,7 +6,7 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
-from transformers.models.bert import BertTokenizerFast, BertModel
+from transformers import BertModel
 from data import preprocess_morph_seg
 from morph_seg_model import TokenCharSegmentDecoder, MorphSegModel
 from collections import Counter
@@ -69,15 +69,15 @@ else:
         file_path = data_samples_file_paths[part]
         logging.info(f'Saving {schema} form tensor dataset to file {file_path}')
         torch.save(datasets[part], file_path)
-train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=False)
+train_dataloader = DataLoader(datasets['train'], batch_size=10, shuffle=False)
 dev_dataloader = DataLoader(datasets['dev'], batch_size=1)
 test_dataloader = DataLoader(datasets['test'], batch_size=1)
 
 # Language Model
-bert_folder_path = Path(f'./experiments/transformers/bert/distilled/wordpiece/{bert_version}-130')
+bert_folder_path = Path(f'./experiments/transformers/bert/distilled/wordpiece/{bert_version}')
 logging.info(f'BERT folder path: {str(bert_folder_path)}')
 bert = BertModel.from_pretrained(str(bert_folder_path))
-bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
+# bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
 logging.info('BERT model and tokenizer loaded')
 
 # Morph Segmentation Model
@@ -91,7 +91,7 @@ num_chars = len(char_vocab['char2index'])
 out_dropout = 0.5
 seg_dec = TokenCharSegmentDecoder(char_emb=char_emb, hidden_size=hidden_size, num_layers=num_layers,
                                   dropout=dropout, out_size=num_chars, out_dropout=out_dropout)
-morph_model = MorphSegModel(bert, bert_tokenizer, seg_dec)
+morph_model = MorphSegModel(bert, seg_dec)
 device = None
 if device is not None:
     morph_model.to(device)
@@ -201,17 +201,14 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
         batch = tuple(t.to(device) for t in batch)
         batch_scores, batch_targets, batch_token_chars, batch_sent_ids = [], [], [], []
         for sent_token_ctx, sent_token_chars, sent_form_chars in zip(model.embed(batch[0]), batch[1], batch[2]):
-            # logger.info(f'sent_token_ctx: {sent_token_ctx}')
             input_token_chars = sent_token_chars[:, :, -1]
             num_tokens = len(sent_token_chars[sent_token_chars[:, 0, 1] > 0])
             target_token_form_chars = sent_form_chars[:, :, -1]
             max_form_len = target_token_form_chars.shape[1]
             use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-            # form_scores, form_states = model(xtokens, input_token_chars, special_symbols, num_tokens, max_form_len,
-            #                                  target_token_form_chars if use_teacher_forcing else None)
-            sent_form_scores = model(sent_token_ctx, input_token_chars, special_symbols, num_tokens, max_form_len,
-                                     target_token_form_chars if use_teacher_forcing else None)
-            batch_scores.append(sent_form_scores)
+            sent_scores, _ = model(sent_token_ctx, input_token_chars, special_symbols, num_tokens, max_form_len,
+                                   target_token_form_chars if use_teacher_forcing else None)
+            batch_scores.append(sent_scores)
             batch_targets.append(target_token_form_chars[:num_tokens])
             batch_token_chars.append(input_token_chars[:num_tokens])
             batch_sent_ids.append(sent_form_chars[:, :, 0].unique().item())
@@ -224,7 +221,7 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
             optimizer.zero_grad()
-        print_loss += loss
+        print_loss += loss.item()
         batch_decoded_segments = []
         with torch.no_grad():
             for sent_form_scores in batch_scores:
@@ -276,23 +273,22 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
 # Optimization
 epochs = 3
 max_grad_norm = 1.0
-lr = 1e-3
+lr = 1e-2
 # freeze bert
 for param in bert.parameters():
     param.requires_grad = False
 parameters = list(filter(lambda p: p.requires_grad, morph_model.parameters()))
 # parameters = morph_model.parameters()
 adam = optim.AdamW(parameters, lr=lr)
-# char_loss_fct = nn.CrossEntropyLoss(reduction='mean', ignore_index=char_vocab['char2index']['<pad>'])
-loss_fct = nn.CrossEntropyLoss(ignore_index=0, reduction='mean')
+loss_fct = nn.CrossEntropyLoss(ignore_index=0)
 teacher_forcing_ratio = 1.0
-# torch.manual_seed(0)
+
 
 # Training epochs
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
     morph_model.train()
-    process(morph_model, train_dataloader, loss_fct, epoch, 'train', 100, teacher_forcing_ratio, adam, max_grad_norm)
+    process(morph_model, train_dataloader, loss_fct, epoch, 'train', 10, teacher_forcing_ratio, adam, max_grad_norm)
     morph_model.eval()
     with torch.no_grad():
         dev_samples = process(morph_model, dev_dataloader, loss_fct, epoch, 'dev', 100)

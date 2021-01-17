@@ -108,18 +108,6 @@ def _collate_morph_form_char_data_samples(morph_form_char_df: pd.DataFrame, char
     return morph_char_data
 
 
-# def _save_morph_emb(data_path: Path, ft_root_path: Path, raw_partition: dict):
-#     logging.info(f'saving morph embedding')
-#     forms = set(form for part in raw_partition for form in raw_partition[part].form)
-#     lemmas = set(lemma for part in raw_partition for lemma in raw_partition[part].lemma)
-#     forms = ['<pad>', '<sep>', '<s>', '</s>'] + sorted(list(forms))
-#     lemmas = ['<pad>', '<sep>', '<s>', '</s>'] + sorted(list(lemmas))
-#     form_vectors, form2index = ft.get_word_vectors('he', ft_root_path / 'models/cc.he.300.bin', forms)
-#     lemma_vectors, lemma2index = ft.get_word_vectors('he', ft_root_path / 'models/cc.he.300.bin', lemmas)
-#     ft.save_word_vectors(processed_path / 'ft_form.vec.txt', form_vectors, form2index)
-#     ft.save_word_vectors(processed_path / 'ft_lemma.vec.txt', lemma_vectors, lemma2index)
-
-
 def get_morph_data(data_path: Path, raw_partition: dict):
     morph_partition = {}
     for part in raw_partition:
@@ -177,43 +165,3 @@ def _load_morph_form_char_data_samples(data_path: Path, partition: list):
 def load_morph_seg_data(data_path: Path, partition: list):
     form_char_data_samples = _load_morph_form_char_data_samples(data_path, partition)
     return to_token_chars(form_char_data_samples)
-    # arr_data = {}
-    # for part in partition:
-    #     morph_form_char_df = morph_form_char_data_samples[part]
-    #     morph_form_char_data = morph_form_char_df[['sent_idx', 'token_idx', 'char_id']]
-    #     morph_form_char_data_groups = morph_form_char_data.groupby('sent_idx')
-    #     sent_arrs = []
-    #     for sent_idx, sent_df in sorted(morph_form_char_data_groups):
-    #         morph_token_data_groups = sent_df.groupby('token_idx')
-    #         sent_arrs.append([token_df.to_numpy() for token_id, token_df in sorted(morph_token_data_groups)
-    #                           if token_id > 0])
-    #     num_chars = [[len(arr) for arr in token_arrs] for token_arrs in sent_arrs]
-    #     max_num_chars = max([n for l in num_chars for n in l])
-    #     char_lengths = [[max_num_chars - n for n in l] for l in num_chars]
-    #     char_arrs = [np.stack([np.pad(arr[:, 2], (0, n)) for arr, n in zip(token_arrs, token_char_lengths)], axis=0) for
-    #                  token_arrs, token_char_lengths in zip(sent_arrs, char_lengths)]
-    #
-    #     num_tokens = [len(token_arrs) for token_arrs in char_arrs]
-    #     max_num_tokens = max(num_tokens)
-    #     token_lengths = [max_num_tokens - n for n in num_tokens]
-    #     token_form_char_arr = np.stack([np.pad(arr, ((0, n), (0, 0))) for arr, n in zip(char_arrs, token_lengths)], axis=0)
-    #
-    #     # morph_form_char_df = morph_form_char_data_samples[part]
-    #     # morph_form_char_data = morph_form_char_df[['sent_idx', 'token_idx', 'char_id']]
-    #     # morph_form_char_data_groups = morph_form_char_data.groupby('sent_idx')
-    #     # sent_arrs = []
-    #     # for sent_idx, sent_df in sorted(morph_form_char_data_groups):
-    #     #     morph_token_data_groups = sent_df.groupby('token_idx')
-    #     #     sent_arrs.append([token_df.to_numpy() for token_id, token_df in sorted(morph_token_data_groups)])
-    #     # token_morph_size = list(set([arr.shape[0] for token_arrs in sent_arrs for arr in token_arrs]))
-    #     # token_lengths = [len(arr) for arr in sent_arrs]
-    #     # max_num_tokens = max(token_lengths)
-    #     # sent_pad_lengths = [max_num_tokens - l for l in token_lengths]
-    #     # for sent_arr, pad_len  in zip(sent_arrs, sent_pad_lengths):
-    #     #     sent_id = np.unique(sent_arr[-1][:, 0]).item()
-    #     #     token_pad_arr = np.array([[sent_id, 0, 0]] * token_morph_size[0], dtype=np.int)
-    #     #     sent_arr.extend([token_pad_arr] * pad_len)
-    #     # morph_form_char_arr = np.stack(sent_arrs, axis=0)
-    #
-    #     arr_data[part] = token_form_char_arr
-    # return arr_data
