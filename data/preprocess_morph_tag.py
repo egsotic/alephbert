@@ -10,9 +10,14 @@ def _collate_morph_tag_data_samples(morph_df: pd.DataFrame, tag2index: dict, inc
         max_num_morphemes += 1
     data_sent_idx, data_token_idx, data_tokens, data_morph_idx = [], [], [], []
     data_forms, data_tags, data_tag_ids = [], [], []
-    prev_sent_id = 1
+    cur_sent_id = None
     tq = tqdm(total=num_sentences, desc="Sentence")
     for (sent_id, token_id), token_df in token_groups:
+        if cur_sent_id != sent_id:
+            if cur_sent_id is not None:
+                tq.update(1)
+            cur_sent_id = sent_id
+
         sent_idxs = list(token_df.sent_id)
         token_idxs = list(token_df.token_id)
         tokens = list(token_df.token)
@@ -20,14 +25,15 @@ def _collate_morph_tag_data_samples(morph_df: pd.DataFrame, tag2index: dict, inc
         forms = list(token_df.form)
         tags = list(token_df.tag)
         tag_ids = [tag2index[t] for t in tags]
+
         if include_eos:
-            sent_idxs += sent_idxs[-1:]
-            token_idxs += token_idxs[-1:]
-            tokens += tokens[-1:]
-            morph_idxs += [-1]
-            forms += forms[-1:]
-            tags += ['</s>']
-            tag_ids += [tag2index['</s>']]
+            sent_idxs.append(sent_idxs[-1])
+            token_idxs.append(token_idxs[-1])
+            tokens.append(tokens[-1])
+            morph_idxs.append(morph_idxs[-1])
+            forms.append(forms[-1])
+            tags.append('</s>')
+            tag_ids.append(tag2index['</s>'])
 
         pad_len = max_num_morphemes - len(tags)
         sent_idxs.extend(sent_idxs[-1:] * pad_len)
@@ -37,10 +43,6 @@ def _collate_morph_tag_data_samples(morph_df: pd.DataFrame, tag2index: dict, inc
         forms.extend(['<pad>'] * pad_len)
         tags.extend(['<pad>'] * pad_len)
         tag_ids.extend([tag2index['<pad>']] * pad_len)
-
-        if sent_id != prev_sent_id:
-            tq.update(1)
-            prev_sent_id = sent_id
 
         data_sent_idx.extend(sent_idxs)
         data_token_idx.extend(token_idxs)
@@ -58,7 +60,7 @@ def _collate_morph_tag_data_samples(morph_df: pd.DataFrame, tag2index: dict, inc
     return morph_tag_data
 
 
-def load_morph_vocab(data_path: Path, partition: list, include_eos: bool):
+def load_morph_vocab(data_path: Path, partition: iter, include_eos: bool):
     logging.info(f'Loading morph vocab')
     char_vectors, char_vocab = load_char_vocab(data_path)
     tags, feats = set(), set()
@@ -105,26 +107,29 @@ def _load_morph_tag_data_samples(data_path: Path, partition: list):
     return tag_samples_partition
 
 
+# def load_morph_tag_data(data_path: Path, partition: list):
+#     morph_tag_data_samples = _load_morph_tag_data_samples(data_path, partition)
+#     arr_data = {}
+#     for part in partition:
+#         morph_tag_df = morph_tag_data_samples[part]
+#         morph_tag_data = morph_tag_df[['sent_idx', 'token_idx', 'tag_id']]
+#         morph_tag_data_groups = morph_tag_data.groupby('sent_idx')
+#         sent_arrs = []
+#         for sent_idx, sent_df in sorted(morph_tag_data_groups):
+#             morph_token_data_groups = sent_df.groupby('token_idx')
+#             sent_arrs.append([token_df.to_numpy() for token_id, token_df in sorted(morph_token_data_groups)])
+#         token_morph_size = list(set([arr.shape[0] for token_arrs in sent_arrs for arr in token_arrs]))
+#         token_lengths = [len(arr) for arr in sent_arrs]
+#         max_num_tokens = max(token_lengths)
+#         sent_pad_lengths = [max_num_tokens - l for l in token_lengths]
+#         for sent_arr, pad_len in zip(sent_arrs, sent_pad_lengths):
+#             sent_id = np.unique(sent_arr[-1][:, 0]).item()
+#             token_pad_arr = np.array([[sent_id, 0, 0]] * token_morph_size[0], dtype=np.int)
+#             sent_arr.extend([token_pad_arr] * pad_len)
+#         morph_tag_arr = np.stack(sent_arrs, axis=0)
+#
+#         arr_data[part] = morph_tag_arr
+#     return arr_data
 def load_morph_tag_data(data_path: Path, partition: list):
     morph_tag_data_samples = _load_morph_tag_data_samples(data_path, partition)
-    arr_data = {}
-    for part in partition:
-        morph_tag_df = morph_tag_data_samples[part]
-        morph_tag_data = morph_tag_df[['sent_idx', 'token_idx', 'tag_id']]
-        morph_tag_data_groups = morph_tag_data.groupby('sent_idx')
-        sent_arrs = []
-        for sent_idx, sent_df in sorted(morph_tag_data_groups):
-            morph_token_data_groups = sent_df.groupby('token_idx')
-            sent_arrs.append([token_df.to_numpy() for token_id, token_df in sorted(morph_token_data_groups)])
-        token_morph_size = list(set([arr.shape[0] for token_arrs in sent_arrs for arr in token_arrs]))
-        token_lengths = [len(arr) for arr in sent_arrs]
-        max_num_tokens = max(token_lengths)
-        sent_pad_lengths = [max_num_tokens - l for l in token_lengths]
-        for sent_arr, pad_len in zip(sent_arrs, sent_pad_lengths):
-            sent_id = np.unique(sent_arr[-1][:, 0]).item()
-            token_pad_arr = np.array([[sent_id, 0, 0]] * token_morph_size[0], dtype=np.int)
-            sent_arr.extend([token_pad_arr] * pad_len)
-        morph_tag_arr = np.stack(sent_arrs, axis=0)
-
-        arr_data[part] = morph_tag_arr
-    return arr_data
+    return to_sub_token_seq(morph_tag_data_samples, 'tag_id')

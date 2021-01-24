@@ -164,4 +164,4 @@ def _load_morph_form_char_data_samples(data_path: Path, partition: list):
 
 def load_morph_seg_data(data_path: Path, partition: list):
     form_char_data_samples = _load_morph_form_char_data_samples(data_path, partition)
-    return to_token_chars(form_char_data_samples)
+    return to_sub_token_seq(form_char_data_samples, 'char_id')

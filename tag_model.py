@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers.models.bert import BertTokenizerFast, BertModel
+from transformers.models.bert import BertModel
 
 
 class TokenTagsDecoder(nn.Module):
@@ -47,37 +47,43 @@ class TokenTagsDecoder(nn.Module):
         return F.pad(dec_scores, (0, 0, 0, fill_len))
 
     def decode(self, label_scores):
-        return torch.argmax(label_scores, dim=2)
+        return torch.argmax(label_scores, dim=-1)
 
 
 class TaggerModel(nn.Module):
 
-    def __init__(self, xmodel: BertModel, xtokenizer: BertTokenizerFast, token_decoder: TokenTagsDecoder):
+    def __init__(self, xmodel: BertModel, token_decoder: TokenTagsDecoder, crf = None):
         super(TaggerModel, self).__init__()
         self.xmodel = xmodel
-        self.xtokenizer = xtokenizer
         self.token_decoder = token_decoder
+        self.crf = crf
 
-    def forward(self, input_xtokens, special_symbols, max_num_token_tags, target_token_tags=None):
-        mask = torch.ne(input_xtokens[:, :, 1], self.xtokenizer.pad_token_id)
-        xoutput = self.xmodel(input_xtokens[:, :, 1], attention_mask=mask)
+    def embed(self, input_xtokens):
+        mask = torch.ne(input_xtokens[:, :, 1], 0)
+        # xoutput = self.xmodel(input_xtokens[mask][:, 1].unsqueeze(dim=0))
+        xoutput = self.xmodel(input_xtokens[:, :, 1])
         emb_xtokens = xoutput.last_hidden_state
-        # groupby token_id
-        xtoken_idxs, xtoken_vals = torch.unique(input_xtokens[:, :, 0][mask], return_counts=True)
-        # token_xtokens = torch.split_with_sizes(input_xtokens[:, :, 1][mask], tuple(xtoken_vals))
-        token_emb_xtokens = torch.split_with_sizes(emb_xtokens[mask], tuple(xtoken_vals))
-        # token_xcontext = torch.stack([torch.mean(t, dim=0) for t in token_emb_xtokens], dim=0)
-        token_xcontext = {k.item(): v for k, v in zip(xtoken_idxs[1:-1], [torch.mean(t, dim=0) for t in token_emb_xtokens[1:-1]])}
+        emb_tokens = []
+        for i in range(len(input_xtokens)):
+            # # groupby token_id
+            # mask = torch.ne(input_xtokens[i, :, 1], 0)
+            idxs, vals = torch.unique_consecutive(input_xtokens[i, :, 0][mask[i]], return_counts=True)
+            token_emb_xtokens = torch.split_with_sizes(emb_xtokens[i][mask[i]], tuple(vals))
+            # token_xcontext = {k.item(): v for k, v in zip(idxs, [torch.mean(t, dim=0) for t in token_emb_xtokens])}
+            emb_tokens.append(torch.stack([torch.mean(t, dim=0) for t in token_emb_xtokens], dim=0))
+        return emb_tokens
+
+    def forward(self, input_token_context, special_symbols, num_tokens, max_num_token_tags, target_token_tags=None):
         sos, eos = special_symbols['<s>'], special_symbols['</s>']
         scores = []
-        for cur_token_idx in token_xcontext:
-            token_state = token_xcontext[cur_token_idx]
+        for cur_token_idx in range(num_tokens):
+            cur_token_state = input_token_context[cur_token_idx + 1]
             target_tags = None
             if target_token_tags is not None:
-                target_tags = target_token_tags[0, cur_token_idx - 1, :, 1]
-            token_scores = self.token_decoder(token_state, sos, eos, max_num_token_tags, target_tags)
+                target_tags = target_token_tags[cur_token_idx]
+            token_scores = self.token_decoder(cur_token_state, sos, eos, max_num_token_tags, target_tags)
             scores.append(token_scores)
-        return len(scores), torch.cat(scores, dim=1)
+        return torch.cat(scores, dim=0)
 
     def decode(self, label_scores):
-        return torch.argmax(label_scores, dim=2)
+        return torch.argmax(label_scores, dim=-1)

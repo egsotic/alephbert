@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import BertModel
 from data import preprocess_morph_seg
-from morph_seg_model import TokenCharSegmentDecoder, MorphSegModel
+from seg_model import TokenCharSegmentDecoder, MorphSegModel
 from collections import Counter
 import pandas as pd
 from bclm import treebank as tb
@@ -199,7 +199,7 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
 
     for i, batch in enumerate(data):
         batch = tuple(t.to(device) for t in batch)
-        batch_scores, batch_targets, batch_token_chars, batch_sent_ids = [], [], [], []
+        batch_scores, batch_targets, batch_token_chars, batch_sent_ids, batch_num_tokens = [], [], [], [], []
         for sent_token_ctx, sent_token_chars, sent_form_chars in zip(model.embed(batch[0]), batch[1], batch[2]):
             input_token_chars = sent_token_chars[:, :, -1]
             num_tokens = len(sent_token_chars[sent_token_chars[:, 0, 1] > 0])
@@ -212,25 +212,27 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
             batch_targets.append(target_token_form_chars[:num_tokens])
             batch_token_chars.append(input_token_chars[:num_tokens])
             batch_sent_ids.append(sent_form_chars[:, :, 0].unique().item())
-        loss_batch_scores = torch.cat(batch_scores)
-        loss_batch_targets = torch.cat(batch_targets)
-        loss = criterion(loss_batch_scores.view(-1, loss_batch_scores.shape[-1]), loss_batch_targets.view(-1))
+            batch_num_tokens.append(num_tokens)
+        batch_targets = nn.utils.rnn.pad_sequence(batch_targets, batch_first=True)
+        batch_scores = nn.utils.rnn.pad_sequence(batch_scores, batch_first=True)
+        loss_batch_targets = batch_targets.view(-1)
+        loss_batch_scores = batch_scores.view(-1, batch_scores.shape[-1])
+        loss = criterion(loss_batch_scores, loss_batch_targets)
+        print_loss += loss.item()
         if optimizer is not None:
             loss.backward()
             if max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
             optimizer.zero_grad()
-        print_loss += loss.item()
-        batch_decoded_segments = []
         with torch.no_grad():
-            for sent_form_scores in batch_scores:
-                decoded_chars = model.decode(sent_form_scores)
-                batch_decoded_segments.append(decoded_chars)
-        for sent_id, input_chars, target_chars, decoded_chars in zip(batch_sent_ids, batch_token_chars, batch_targets, batch_decoded_segments):
+            batch_decoded_chars = model.decode(batch_scores)
+        for sent_id, input_chars, target_chars, decoded_chars, num_tokens in zip(batch_sent_ids, batch_token_chars,
+                                                                               batch_targets, batch_decoded_chars,
+                                                                               batch_num_tokens):
             input_chars = input_chars.to('cpu')
-            target_chars = target_chars.to('cpu')
-            decoded_chars = decoded_chars.to('cpu')
+            target_chars = target_chars[:num_tokens].to('cpu')
+            decoded_chars = decoded_chars[:num_tokens].to('cpu')
             input_tokens = to_sent_tokens(input_chars)
             target_segments = to_sent_token_segments(target_chars)
             decoded_segments = to_sent_token_segments(decoded_chars)
@@ -241,10 +243,10 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
 
         if (i + 1) % print_every == 0:
             sent_id, input_tokens, decoded_segments = print_decoded_lattice_rows[-1]
-            input_segments = print_target_forms[-1]
+            target_segments = print_target_forms[-1]
             print(f'epoch {epoch} {phase}, step {i + 1} form char loss: {print_loss / print_every}')
             print(f'sent #{sent_id} input tokens  : {input_tokens}')
-            print(f'sent #{sent_id} target forms  : {list(reversed(input_segments))}')
+            print(f'sent #{sent_id} target forms  : {list(reversed(target_segments))}')
             print(f'sent #{sent_id} decoded forms : {list(reversed(decoded_segments))}')
             total_loss += print_loss
             print_loss = 0
@@ -297,14 +299,14 @@ for i in trange(epochs, desc="Epoch"):
         print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], step=epoch)
 # dev_samples.to_csv(out_path / 'dev.lattices.csv', index=False)
 # test_samples.to_csv(out_path / 'test.lattices.csv', index=False)
-# torch.save(morph_model.state_dict(), out_path / 'model-state.pt')
-# torch.save(morph_model, out_path / 'model.pt')
+# torch.save(morph_model.state_dict(), out_path / 'morph-model-state.pt')
+# torch.save(morph_model, out_path / 'morph-model.pt')
 
 
 def test():
     out_path = Path(f'experiments/morph-seg/bert/distilled/wordpiece/{bert_version}/UD_Hebrew/HTB')
     # out_path = Path(f'experiments/morph-seg/bert/distilled/wordpiece/{bert_version}/HebrewTreebank/hebtb')
-    m = torch.load(out_path / 'model.pt', map_location=torch.device('cpu'))
+    m = torch.load(out_path / 'morph-model.pt', map_location=torch.device('cpu'))
     m.eval()
     with torch.no_grad():
         dev_samples = process(m, dev_dataloader, loss_fct, epoch, 'dev', 10)

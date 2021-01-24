@@ -61,7 +61,7 @@ class TokenCharSegmentDecoder(nn.Module):
         return F.pad(dec_scores, (0, 0, 0, fill_len)), F.pad(dec_states, (0, 0, 0, fill_len))
 
     def decode(self, label_scores):
-        return torch.argmax(label_scores, dim=2)
+        return torch.argmax(label_scores, dim=-1)
 
 
 class MorphSegModel(nn.Module):
@@ -72,17 +72,19 @@ class MorphSegModel(nn.Module):
         self.segment_decoder = segment_decoder
 
     def embed(self, input_xtokens):
+        mask = torch.ne(input_xtokens[:, :, 1], 0)
+        # xoutput = self.xmodel(input_xtokens[mask][:, 1].unsqueeze(dim=0))
         xoutput = self.xmodel(input_xtokens[:, :, 1])
         emb_xtokens = xoutput.last_hidden_state
         emb_tokens = []
         for i in range(len(input_xtokens)):
             # # groupby token_id
-            xtoken_idxs, xtoken_vals = torch.unique_consecutive(input_xtokens[i, :, 0], return_counts=True)
-            token_emb_xtokens = torch.split_with_sizes(emb_xtokens[i], tuple(xtoken_vals))
-            # token_xcontext = {k.item(): v for k, v in zip(xtoken_idxs, [torch.mean(t, dim=0) for t in token_emb_xtokens])}
+            # mask = torch.ne(input_xtokens[i, :, 1], 0)
+            idxs, vals = torch.unique_consecutive(input_xtokens[i, :, 0][mask[i]], return_counts=True)
+            token_emb_xtokens = torch.split_with_sizes(emb_xtokens[i][mask[i]], tuple(vals))
+            # token_xcontext = {k.item(): v for k, v in zip(idxs, [torch.mean(t, dim=0) for t in token_emb_xtokens])}
             emb_tokens.append(torch.stack([torch.mean(t, dim=0) for t in token_emb_xtokens], dim=0))
         return emb_tokens
-
 
     def forward(self, input_token_context, input_token_chars, special_symbols, num_tokens, max_form_len, target_chars=None):
         sos, eos = special_symbols['<s>'], special_symbols['</s>']

@@ -200,15 +200,44 @@ def _load_token_char_data_samples(data_path: Path, partition: list):
     return token_char_samples_partition
 
 
-def to_token_chars(token_char_data_samples: dict):
+# def to_token_chars(token_char_data_samples: dict):
+#     data_arrs = {}
+#     for part in token_char_data_samples:
+#         token_char_df = token_char_data_samples[part]
+#         token_char_data = token_char_df[['sent_idx', 'token_idx', 'char_id']]
+#         sent_groups = token_char_data.groupby('sent_idx')
+#         num_sentences = len(sent_groups)
+#         max_num_tokens = token_char_data.token_idx.max()
+#         token_groups = token_char_data.groupby(['sent_idx', 'token_idx'])
+#         token_lengths = set([len(token_df) for _, token_df in token_groups])
+#         if len(token_lengths) != 1:
+#             raise Exception(f'malformed token char data samples: len(token_lengths) != 1 ({len(token_lengths)})')
+#         token_len = list(token_lengths)[0]
+#         tq = tqdm(total=num_sentences, desc="Sentence")
+#         sent_arrs = []
+#         for sent_id, sent_df in sorted(sent_groups):
+#             sent_arr = sent_df.to_numpy().reshape(-1, token_len, 3)
+#             sent_num_tokens = sent_df.token_idx.max()
+#             pad_len = max_num_tokens - sent_num_tokens
+#             if pad_len > 0:
+#                 pad_arr = np.array([[[sent_id, -1, 0]] * token_len] * pad_len)
+#                 sent_arr = np.concatenate([sent_arr, pad_arr])
+#             sent_arrs.append(sent_arr)
+#             tq.update(1)
+#         tq.close()
+#         data_arrs[part] = np.stack(sent_arrs, axis=0)
+#     return data_arrs
+
+
+def to_sub_token_seq(token_char_data_samples: dict, field_name):
     data_arrs = {}
     for part in token_char_data_samples:
         token_char_df = token_char_data_samples[part]
-        token_char_data = token_char_df[['sent_idx', 'token_idx', 'char_id']]
-        sent_groups = token_char_data.groupby('sent_idx')
+        sub_token_field_data = token_char_df[['sent_idx', 'token_idx', field_name]]
+        sent_groups = sub_token_field_data.groupby('sent_idx')
         num_sentences = len(sent_groups)
-        max_num_tokens = token_char_data.token_idx.max()
-        token_groups = token_char_data.groupby(['sent_idx', 'token_idx'])
+        max_num_tokens = sub_token_field_data.token_idx.max()
+        token_groups = sub_token_field_data.groupby(['sent_idx', 'token_idx'])
         token_lengths = set([len(token_df) for _, token_df in token_groups])
         if len(token_lengths) != 1:
             raise Exception(f'malformed token char data samples: len(token_lengths) != 1 ({len(token_lengths)})')
@@ -242,4 +271,4 @@ def load_xtoken_data(data_path: Path, partition: list):
 
 def load_token_char_data(data_path: Path, partition: list):
     token_char_data_samples = _load_token_char_data_samples(data_path, partition)
-    return to_token_chars(token_char_data_samples)
+    return to_sub_token_seq(token_char_data_samples, 'char_id')

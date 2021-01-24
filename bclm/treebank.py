@@ -18,7 +18,7 @@ def save_lattice_as_ner_format(input_lattice_file_path, output_ner_file_path):
             f.write('\n')
 
 
-def spmrl_ner_conllu(data_root_path, tb_root_path=None, tb_name='hebtb', ma_name=None):
+def spmrl_ner_conllu(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     logging.info('SPMRL NER conllu')
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
