@@ -42,7 +42,12 @@ elif tb_name == 'hebtb':
         partition = tb.spmrl(raw_root_path, tb_name)
 else:
     partition = {'train': None, 'dev': None, 'test': None}
-bert_version = 'bert-distilled-wordpiece-oscar-52000'
+tokenizer_type = 'wordpiece'
+vocab_size = 52000
+corpus_name = 'oscar'
+bert_model_size = 'distilled'
+# bert_version = 'mbert'
+bert_version = f'bert-{bert_model_size}-{tokenizer_type}-{corpus_name}-{vocab_size}'
 preprocessed_data_root_path = Path(f'data/preprocessed/{data_src}/{tb_name}/{bert_version}')
 
 
@@ -78,7 +83,7 @@ dev_dataloader = DataLoader(datasets['dev'], batch_size=1)
 test_dataloader = DataLoader(datasets['test'], batch_size=1)
 
 # Language Model
-bert_folder_path = Path(f'./experiments/transformers/bert/distilled/wordpiece/{bert_version}')
+bert_folder_path = Path(f'./experiments/transformers/bert/{bert_model_size}/{tokenizer_type}/{bert_version}')
 logging.info(f'BERT folder path: {str(bert_folder_path)}')
 bert = BertModel.from_pretrained(str(bert_folder_path))
 # bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
@@ -97,7 +102,8 @@ dropout = 0.1
 out_dropout = 0.5
 tag_dec = TokenTagsDecoder(tag_emb, hidden_size, num_layers, dropout, num_tags, out_dropout)
 if data_src == "for_amit_spmrl":
-    crf = ConditionalRandomField(num_tags=num_tags, constraints=allowed_transitions(constraint_type="BIOSE", labels=tag_vocab['index2tag']))
+    crf = ConditionalRandomField(num_tags=num_tags, constraints=allowed_transitions(constraint_type="BIOSE",
+                                                                                    labels=tag_vocab['index2tag']))
 else:
     crf = ConditionalRandomField(num_tags=num_tags)
 tagger_model = TaggerModel(bert, tag_dec, crf)
@@ -248,7 +254,8 @@ def process(model: TaggerModel, data: DataLoader, criterion: nn.CrossEntropyLoss
                 crf_batch_masks = ~torch.cumsum(crf_batch_masks, dim=2).bool()
                 crf_batch_masked_scores = [scores[mask] for scores, mask in zip(batch_scores, crf_batch_masks)]
                 crf_batch_scores = nn.utils.rnn.pad_sequence(crf_batch_masked_scores, batch_first=True)
-                crf_batch_token_masks = [torch.ones_like(scores[:, 0], dtype=torch.bool) for scores in crf_batch_masked_scores]
+                crf_batch_token_masks = [torch.ones_like(scores[:, 0], dtype=torch.bool)
+                                         for scores in crf_batch_masked_scores]
                 crf_batch_token_masks = nn.utils.rnn.pad_sequence(crf_batch_token_masks, batch_first=True)
                 crf_batch_decoded_tags = model.crf.viterbi_tags(logits=crf_batch_scores, mask=crf_batch_token_masks)
                 for decoded_tags, crf_decoded_tags, crf_mask in zip(batch_decoded_tags, crf_batch_decoded_tags, crf_batch_masks):

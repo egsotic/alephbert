@@ -38,7 +38,12 @@ elif tb_name == 'hebtb':
     partition = tb.spmrl(raw_root_path, tb_name)
 else:
     partition = {'train': None, 'dev': None, 'test': None}
-bert_version = 'bert-distilled-wordpiece-oscar-52000'
+tokenizer_type = 'wordpiece'
+vocab_size = 52000
+corpus_name = 'oscar'
+bert_model_size = 'distilled'
+# bert_version = 'mbert'
+bert_version = f'bert-{bert_model_size}-{tokenizer_type}-{corpus_name}-{vocab_size}'
 preprocessed_data_root_path = Path(f'data/preprocessed/{data_src}/{tb_name}/{bert_version}')
 
 
@@ -69,12 +74,12 @@ else:
         file_path = data_samples_file_paths[part]
         logging.info(f'Saving {schema} form tensor dataset to file {file_path}')
         torch.save(datasets[part], file_path)
-train_dataloader = DataLoader(datasets['train'], batch_size=10, shuffle=False)
+train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=False)
 dev_dataloader = DataLoader(datasets['dev'], batch_size=1)
 test_dataloader = DataLoader(datasets['test'], batch_size=1)
 
 # Language Model
-bert_folder_path = Path(f'./experiments/transformers/bert/distilled/wordpiece/{bert_version}')
+bert_folder_path = Path(f'./experiments/transformers/bert/{bert_model_size}/{tokenizer_type}/{bert_version}')
 logging.info(f'BERT folder path: {str(bert_folder_path)}')
 bert = BertModel.from_pretrained(str(bert_folder_path))
 # bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
