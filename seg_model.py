@@ -8,30 +8,28 @@ class TokenCharSegmentDecoder(nn.Module):
     def __init__(self, char_emb, hidden_size, num_layers, dropout, out_size, out_dropout):
         super(TokenCharSegmentDecoder, self).__init__()
         self.char_emb = char_emb
-        self.enc_input_size = self.char_emb.embedding_dim
-        self.enc_hidden_size = hidden_size
-        self.enc_num_layers = num_layers
-        self.enc_dropout = dropout
-        self.dec_input_size = self.char_emb.embedding_dim
-        self.dec_hidden_size = hidden_size
-        self.dec_num_layers = num_layers
-        self.dec_dropout = dropout
-        self.out_size = out_size
-        self.out_dropput = out_dropout
-        self.encoder = nn.GRU(input_size=self.enc_input_size,
-                              hidden_size=self.enc_hidden_size,
-                              num_layers=self.enc_num_layers,
+        self.encoder = nn.GRU(input_size=char_emb.embedding_dim,
+                              hidden_size=hidden_size,
+                              num_layers=num_layers,
                               bidirectional=False,
                               batch_first=False,
-                              dropout=self.enc_dropout)
-        self.decoder = nn.GRU(input_size=self.dec_input_size,
-                              hidden_size=self.dec_hidden_size,
-                              num_layers=self.dec_num_layers,
+                              dropout=dropout)
+        self.decoder = nn.GRU(input_size=char_emb.embedding_dim,
+                              hidden_size=hidden_size,
+                              num_layers=num_layers,
                               bidirectional=False,
                               batch_first=False,
-                              dropout=self.dec_dropout)
-        self.char_out = nn.Linear(in_features=self.dec_hidden_size, out_features=self.out_size)
-        self.dropout = nn.Dropout(self.out_dropput)
+                              dropout=dropout)
+        self.char_out = nn.Linear(in_features=self.decoder.hidden_size, out_features=out_size)
+        self.out_dropout = nn.Dropout(out_dropout)
+
+    @property
+    def enc_num_layers(self):
+        return self.encoder.num_layers
+
+    @property
+    def dec_num_layers(self):
+        return self.decoder.num_layers
 
     def forward(self, char_seq, enc_state, sos, eos, max_len, target_char_seq):
         mask = torch.ne(char_seq, 0)
@@ -45,7 +43,7 @@ class TokenCharSegmentDecoder(nn.Module):
         while len(dec_scores) < max_len:
             emb_dec_char = self.char_emb(dec_char).unsqueeze(1)
             dec_output, dec_state = self.decoder(emb_dec_char, dec_state)
-            dec_output = self.dropout(dec_output)
+            dec_output = self.out_dropout(dec_output)
             dec_output = self.char_out(dec_output)
             if target_char_seq is not None:
                 dec_char = target_char_seq[len(dec_scores)].unsqueeze(0)

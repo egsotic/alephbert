@@ -36,7 +36,10 @@ raw_root_path = Path(f'data/raw/{data_src}')
 if tb_name == 'HTB':
     partition = tb.ud(raw_root_path, tb_name)
 elif tb_name == 'hebtb':
-    partition = tb.spmrl(raw_root_path, tb_name)
+    if schema == "UD":
+        partition = tb.spmrl_conllu(raw_root_path, tb_name)
+    else:
+        partition = tb.spmrl(raw_root_path, tb_name)
 else:
     partition = {'train': None, 'dev': None, 'test': None}
 tokenizer_type = 'wordpiece'
@@ -77,7 +80,7 @@ else:
         file_path = data_samples_file_paths[part]
         logging.info(f'Saving {schema} form tag tensor dataset to file {file_path}')
         torch.save(datasets[part], file_path)
-datasets['train'] = TensorDataset(*[t[:10] for t in datasets['train'].tensors])
+# datasets['train'] = TensorDataset(*[t[:10] for t in datasets['train'].tensors])
 train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=False)
 dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
 test_dataloader = DataLoader(datasets['test'], batch_size=100)
