@@ -30,32 +30,24 @@ class MorphTagger(nn.Module):
     def forward(self, input_token_context, input_token_chars, special_symbols, num_tokens, max_form_len, max_num_tags,  target_chars=None):
         sos = special_symbols['</s>']
         sep = special_symbols['<sep>']
-        pad = special_symbols['<pad>']
         morph_scores, morph_states = self.morph_emb(input_token_context, input_token_chars, special_symbols, num_tokens, max_form_len, target_chars)
         if target_chars is not None:
             morph_chars = target_chars
         else:
             morph_chars = self.morph_emb.decode(morph_scores).squeeze(0)
-        token_mask = torch.eq(morph_chars[:num_tokens], sos)
-        morph_mask = torch.eq(morph_chars[:num_tokens], sep)
-        mask = torch.bitwise_or(token_mask, morph_mask)
-        morph_tag_states = morph_states[mask]
-        enc_scores, _ = self.encoder(morph_tag_states.unsqueeze(dim=1))
-        enc_scores = self.dropout(enc_scores)
-        tag_scores = self.tag_out(enc_scores)
+        sos_mask = torch.eq(morph_chars[:num_tokens], sos)
+        sep_mask = torch.eq(morph_chars[:num_tokens], sep)
+        tag_mask = torch.bitwise_or(sos_mask, sep_mask)
+        tag_states = morph_states[tag_mask]
+        enc_tag_scores, _ = self.encoder(tag_states.unsqueeze(dim=1))
+        enc_tag_scores = self.dropout(enc_tag_scores)
+        tag_scores = self.tag_out(enc_tag_scores)
 
-        idxs, vals = torch.unique_consecutive(token_mask, return_counts=True)
-        morph_chars = torch.split_with_sizes(morph_chars[:num_tokens].view(-1), tuple(vals))
-        tag_sizes = []
-        for token_morph_chars in morph_chars:
-            if torch.all(torch.eq(token_morph_chars, sos)):
-                continue
-            if torch.all(torch.eq(token_morph_chars, pad)):
-                continue
-            token_morph_chars = token_morph_chars[token_morph_chars != pad]
-            morph_mask = torch.eq(token_morph_chars, sep)
-            tag_sizes.append(torch.sum(morph_mask).item() + 1)
-        tag_scores = torch.split_with_sizes(tag_scores.squeeze(dim=1), tag_sizes)
+        token_mask = ~torch.cumsum(sos_mask, dim=1).bool()
+        token_sep_mask = torch.bitwise_and(token_mask, sep_mask)
+        tag_sizes = torch.sum(token_sep_mask, dim=1) + 1
+
+        tag_scores = torch.split_with_sizes(tag_scores.squeeze(dim=1), tuple(tag_sizes))
         tag_scores = nn.utils.rnn.pad_sequence(tag_scores, batch_first=True)
         fill_len = max_num_tags - tag_scores.shape[1]
         tag_scores = F.pad(tag_scores, (0, 0, 0, fill_len))

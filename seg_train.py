@@ -289,7 +289,7 @@ def process(model: MorphSegModel, data: DataLoader, criterion: nn.CrossEntropyLo
 # Optimization
 epochs = 3
 max_grad_norm = 1.0
-lr = 1e-2
+lr = 1e-3
 # freeze bert
 for param in bert.parameters():
     param.requires_grad = False

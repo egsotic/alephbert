@@ -49,7 +49,7 @@ preprocessed_data_root_path = Path(f'data/preprocessed/{data_src}/{tb_name}/{ber
 
 
 def load_preprocessed_data_samples(data_root_path, partition):
-    logging.info(f'Loading preprocesssed {schema} form data samples')
+    logging.info(f'Loading preprocesssed {schema} form tag data samples')
     xtoken_data = preprocess_morph_seg.load_xtoken_data(data_root_path, partition)
     token_char_data = preprocess_morph_seg.load_token_char_data(data_root_path, partition)
     form_char_data = preprocess_morph_seg.load_morph_seg_data(data_root_path, partition)
@@ -77,7 +77,8 @@ else:
         file_path = data_samples_file_paths[part]
         logging.info(f'Saving {schema} form tag tensor dataset to file {file_path}')
         torch.save(datasets[part], file_path)
-train_dataloader = DataLoader(datasets['train'], batch_size=100, shuffle=False)
+datasets['train'] = TensorDataset(*[t[:10] for t in datasets['train'].tensors])
+train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=False)
 dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
 test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
@@ -94,7 +95,7 @@ char_vectors, char_vocab, tag_vocab, _ = preprocess_morph_tag.load_morph_vocab(p
 char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float), freeze=False,
                                         padding_idx=char_vocab['char2index']['<pad>'])
 num_tags = len(tag_vocab['tag2index'])
-tag_emb = nn.Embedding(num_embeddings=num_tags, embedding_dim=50, padding_idx=0)
+tag_emb = nn.Embedding(num_embeddings=num_tags, embedding_dim=50, padding_idx=tag_vocab['tag2index']['<pad>'])
 num_layers = 2
 hidden_size = bert.config.hidden_size // num_layers
 dropout = 0.1
@@ -113,11 +114,16 @@ if device is not None:
 print(morph_tagger_model)
 
 # Special symbols
-sos = torch.tensor([char_vocab['char2index']['<s>']], dtype=torch.long)
-eos = torch.tensor([char_vocab['char2index']['</s>']], dtype=torch.long)
-sep = torch.tensor([char_vocab['char2index']['<sep>']], dtype=torch.long)
-pad = torch.tensor([char_vocab['char2index']['<pad>']], dtype=torch.long)
-special_symbols = {'<s>': sos.to(device), '</s>': eos.to(device), '<sep>': sep.to(device), '<pad>': pad.to(device)}
+char_sos = torch.tensor([char_vocab['char2index']['<s>']], dtype=torch.long)
+char_eos = torch.tensor([char_vocab['char2index']['</s>']], dtype=torch.long)
+char_sep = torch.tensor([char_vocab['char2index']['<sep>']], dtype=torch.long)
+char_pad = torch.tensor([char_vocab['char2index']['<pad>']], dtype=torch.long)
+char_special_symbols = {'<s>': char_sos.to(device), '</s>': char_eos.to(device), '<sep>': char_sep.to(device),
+                        '<pad>': char_pad.to(device)}
+tag_sos = torch.tensor([tag_vocab['tag2index']['<s>']], dtype=torch.long)
+tag_eos = torch.tensor([tag_vocab['tag2index']['</s>']], dtype=torch.long)
+tag_pad = torch.tensor([tag_vocab['tag2index']['<pad>']], dtype=torch.long)
+tag_special_symbols = {'<s>': tag_sos.to(device), '</s>': tag_eos.to(device), '<pad>': tag_pad.to(device)}
 
 
 def to_sent_tokens(token_chars):
@@ -130,12 +136,12 @@ def to_sent_tokens(token_chars):
 
 def to_sent_token_morph_segments(sent_token_morph_chars):
     tokens = []
-    token_mask = torch.nonzero(torch.eq(sent_token_morph_chars, eos))
+    token_mask = torch.nonzero(torch.eq(sent_token_morph_chars, char_eos))
     token_mask_map = {m[0].item(): m[1].item() for m in token_mask}
     for i, token_chars in enumerate(sent_token_morph_chars):
         token_len = token_mask_map[i] if i in token_mask_map else sent_token_morph_chars.shape[1]
         token_chars = token_chars[:token_len]
-        form_mask = torch.nonzero(torch.eq(token_chars, sep))
+        form_mask = torch.nonzero(torch.eq(token_chars, char_sep))
         forms = []
         start_pos = 0
         for to_pos in form_mask:
@@ -153,7 +159,7 @@ def to_sent_token_morph_segments(sent_token_morph_chars):
 def to_sent_token_morph_tags(sent_token_tags):
     tokens = []
     for token_tags in sent_token_tags:
-        tags = token_tags[token_tags != pad]
+        tags = token_tags[token_tags != tag_pad]
         tags = [tag_vocab['index2tag'][t.item()] for t in tags]
         tokens.append(tags)
     return tokens
@@ -216,14 +222,14 @@ def print_eval_scores(decoded_df, truth_df, step):
 # Training and evaluation routine
 def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss, epoch, phase, print_every,
             teacher_forcing_ratio=0.0, optimizer=None, max_grad_norm=None):
-    print_morph_loss, print_tag_loss, total_morph_loss, total_tag_loss = 0, 0, 0, 0
+    print_form_loss, print_tag_loss, total_form_loss, total_tag_loss = 0, 0, 0, 0
     print_target_forms, print_target_tags, total_target_forms, total_target_tags = [], [], [], []
     print_decoded_forms, print_decoded_tags, total_decoded_forms, total_decoded_tags = [], [], [], []
     print_decoded_lattice_rows, total_decoded_lattice_rows = [], []
 
     for i, batch in enumerate(data):
         batch = tuple(t.to(device) for t in batch)
-        batch_morph_scores, batch_tag_scores, batch_morph_targets, batch_tag_targets = [], [], [], []
+        batch_form_scores, batch_tag_scores, batch_form_targets, batch_tag_targets = [], [], [], []
         batch_token_chars, batch_sent_ids, batch_num_tokens = [], [], []
         for sent_token_ctx, sent_token_chars, sent_form_chars, sent_form_tags in zip(model.embed_xtokens(batch[0]),
                                                                                      batch[1], batch[2], batch[3]):
@@ -231,34 +237,34 @@ def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss
             num_tokens = len(sent_token_chars[sent_token_chars[:, 0, 1] > 0])
             target_token_form_chars = sent_form_chars[:, :, -1]
             max_form_len = target_token_form_chars.shape[1]
-            target_form_tags = sent_form_tags[:, :, -1]
-            max_num_tags = target_form_tags.shape[1]
+            target_token_form_tags = sent_form_tags[:, :, -1]
+            max_num_tags = target_token_form_tags.shape[1]
             use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-            morph_scores, tag_scores = model(sent_token_ctx, input_token_chars, special_symbols, num_tokens,
-                                             max_form_len, max_num_tags,
-                                             target_token_form_chars if use_teacher_forcing else None)
-            batch_morph_scores.append(morph_scores)
+            form_scores, tag_scores = model(sent_token_ctx, input_token_chars, char_special_symbols, num_tokens,
+                                            max_form_len, max_num_tags,
+                                            target_token_form_chars if use_teacher_forcing else None)
+            batch_form_scores.append(form_scores)
             batch_tag_scores.append(tag_scores)
-            batch_morph_targets.append(target_token_form_chars[:num_tokens])
-            batch_tag_targets.append(target_form_tags[:num_tokens])
+            batch_form_targets.append(target_token_form_chars[:num_tokens])
+            batch_tag_targets.append(target_token_form_tags[:num_tokens])
             batch_token_chars.append(input_token_chars[:num_tokens])
             batch_sent_ids.append(sent_form_chars[:, :, 0].unique().item())
             batch_num_tokens.append(num_tokens)
 
         # Decode
-        batch_morph_scores = nn.utils.rnn.pad_sequence(batch_morph_scores, batch_first=True)
+        batch_form_scores = nn.utils.rnn.pad_sequence(batch_form_scores, batch_first=True)
         batch_tag_scores = nn.utils.rnn.pad_sequence(batch_tag_scores, batch_first=True)
         with torch.no_grad():
-            batch_decoded_chars, batch_decoded_tags = model.decode(batch_morph_scores, batch_tag_scores)
+            batch_decoded_chars, batch_decoded_tags = model.decode(batch_form_scores, batch_tag_scores)
 
         # Loss
-        batch_morph_targets = nn.utils.rnn.pad_sequence(batch_morph_targets, batch_first=True)
+        batch_form_targets = nn.utils.rnn.pad_sequence(batch_form_targets, batch_first=True)
         batch_tag_targets = nn.utils.rnn.pad_sequence(batch_tag_targets, batch_first=True)
         # Morph Loss
-        loss_batch_morph_targets = batch_morph_targets.view(-1)
-        loss_batch_morph_scores = batch_morph_scores.view(-1, batch_morph_scores.shape[-1])
-        morph_loss = criterion(loss_batch_morph_scores, loss_batch_morph_targets)
-        print_morph_loss += morph_loss.item()
+        loss_batch_form_targets = batch_form_targets.view(-1)
+        loss_batch_form_scores = batch_form_scores.view(-1, batch_form_scores.shape[-1])
+        form_loss = criterion(loss_batch_form_scores, loss_batch_form_targets)
+        print_form_loss += form_loss.item()
         # Tag Loss
         loss_batch_tag_targets = batch_tag_targets.view(-1)
         loss_batch_tag_scores = batch_tag_scores.view(-1, batch_tag_scores.shape[-1])
@@ -267,7 +273,7 @@ def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss
 
         # Optimization Step
         if optimizer is not None:
-            morph_loss.backward(retain_graph=True)
+            form_loss.backward(retain_graph=True)
             tag_loss.backward()
             if max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -275,16 +281,17 @@ def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss
             optimizer.zero_grad()
 
         # To Lattice
-        for item in zip(batch_sent_ids, batch_token_chars, batch_morph_targets, batch_tag_targets,
+        for item in zip(batch_sent_ids, batch_token_chars, batch_form_targets, batch_tag_targets,
                         batch_decoded_chars, batch_decoded_tags, batch_num_tokens):
-            sent_id, input_chars, target_chars, target_tags, decoded_chars, decoded_tags, num_tokens = item
+            sent_id, input_chars, target_form_chars, target_tags, decoded_form_chars, decoded_tags, num_tokens = item
             input_chars = input_chars.to('cpu')
-            target_chars = target_chars[:num_tokens].to('cpu')
-            decoded_chars = decoded_chars[:num_tokens].to('cpu')
+            target_form_chars = target_form_chars[:num_tokens].to('cpu')
+            decoded_form_chars = decoded_form_chars[:num_tokens].to('cpu')
+            target_tags = target_tags[:num_tokens].to('cpu')
             decoded_tags = decoded_tags[:num_tokens].to('cpu')
             input_tokens = to_sent_tokens(input_chars)
-            target_morph_segments = to_sent_token_morph_segments(target_chars)
-            decoded_morph_segments = to_sent_token_morph_segments(decoded_chars)
+            target_morph_segments = to_sent_token_morph_segments(target_form_chars)
+            decoded_morph_segments = to_sent_token_morph_segments(decoded_form_chars)
             target_morph_tags = to_sent_token_morph_tags(target_tags)
             decoded_morph_tags = to_sent_token_morph_tags(decoded_tags)
 
@@ -300,16 +307,16 @@ def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss
             sent_id, input_tokens, decoded_segments, decoded_tags = print_decoded_lattice_rows[-1]
             target_segments = print_target_forms[-1]
             target_tags = print_target_tags[-1]
-            print(f'epoch {epoch} {phase}, step {i + 1} form char loss: {print_morph_loss / print_every}')
+            print(f'epoch {epoch} {phase}, step {i + 1} form char loss: {print_form_loss / print_every}')
             print(f'epoch {epoch} {phase}, step {i + 1} tag loss: {print_tag_loss / print_every}')
             print(f'sent #{sent_id} input tokens  : {input_tokens}')
             print(f'sent #{sent_id} target forms  : {list(reversed(target_segments))}')
             print(f'sent #{sent_id} decoded forms : {list(reversed(decoded_segments))}')
             print(f'sent #{sent_id} target tags  : {list(reversed(target_tags))}')
             print(f'sent #{sent_id} decoded tags : {list(reversed(decoded_tags))}')
-            total_morph_loss += print_morph_loss
+            total_form_loss += print_form_loss
             total_tag_loss += print_tag_loss
-            print_morph_loss = 0
+            print_form_loss = 0
             print_tag_loss = 0
 
             aligned_scores, mset_scores = morph_eval(print_decoded_forms, print_target_forms)
@@ -330,15 +337,15 @@ def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss
             print_decoded_lattice_rows = []
 
     # Log Total Eval
-    if print_morph_loss > 0:
-        total_morph_loss += print_morph_loss
+    if print_form_loss > 0:
+        total_form_loss += print_form_loss
         total_tag_loss += print_tag_loss
         total_decoded_forms.extend(print_decoded_forms)
         total_decoded_tags.extend(print_decoded_tags)
         total_target_forms.extend(print_target_forms)
         total_target_tags.extend(print_target_tags)
         total_decoded_lattice_rows.extend(print_decoded_lattice_rows)
-    print(f'epoch {epoch} {phase}, total form char loss: {total_morph_loss / len(data)}')
+    print(f'epoch {epoch} {phase}, total form char loss: {total_form_loss / len(data)}')
     print(f'epoch {epoch} {phase}, total tag loss: {total_tag_loss / len(data)}')
     aligned_scores, mset_scores = morph_eval(total_decoded_forms, total_target_forms)
     print(aligned_scores)
@@ -363,7 +370,7 @@ teacher_forcing_ratio = 1.0
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
     morph_model.train()
-    process(morph_tagger_model, train_dataloader, loss_fct, epoch, 'train', 1, teacher_forcing_ratio, adam,
+    process(morph_tagger_model, train_dataloader, loss_fct, epoch, 'train', 100, teacher_forcing_ratio, adam,
             max_grad_norm)
     morph_model.eval()
     with torch.no_grad():

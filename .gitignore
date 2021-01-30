@@ -5,3 +5,4 @@ data/preprocessed
 experiments/
 runs/
 .ipynb_checkpoints
+*.ipynb

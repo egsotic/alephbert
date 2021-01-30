@@ -85,9 +85,9 @@ class MorphSegModel(nn.Module):
             # # groupby token_id
             # mask = torch.ne(input_xtokens[i, :, 1], 0)
             idxs, vals = torch.unique_consecutive(input_xtokens[i, :, 0][mask[i]], return_counts=True)
-            token_emb_xtokens = torch.split_with_sizes(emb_xtokens[i][mask[i]], tuple(vals))
+            token_emb_xtoken_split = torch.split_with_sizes(emb_xtokens[i][mask[i]], tuple(vals))
             # token_xcontext = {k.item(): v for k, v in zip(idxs, [torch.mean(t, dim=0) for t in token_emb_xtokens])}
-            emb_tokens.append(torch.stack([torch.mean(t, dim=0) for t in token_emb_xtokens], dim=0))
+            emb_tokens.append(torch.stack([torch.mean(t, dim=0) for t in token_emb_xtoken_split], dim=0))
         return emb_tokens
 
     def forward(self, input_token_context, input_token_chars, special_symbols, num_tokens, max_form_len,
