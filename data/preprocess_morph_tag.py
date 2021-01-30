@@ -130,6 +130,13 @@ def _load_morph_tag_data_samples(data_path: Path, partition: list):
 #
 #         arr_data[part] = morph_tag_arr
 #     return arr_data
-def load_morph_tag_data(data_path: Path, partition: list):
+def load_morph_tag_data(data_path: Path, partition: list, include_eos: bool):
     morph_tag_data_samples = _load_morph_tag_data_samples(data_path, partition)
+    if not include_eos:
+        for part in morph_tag_data_samples:
+            mask = morph_tag_data_samples[part].tag_id == 2
+            morph_tag_data_samples[part].loc[mask, 'tag_id'] = 0
+            morph_tag_data_samples[part].loc[mask, 'tag'] = '<pad>'
+            morph_tag_data_samples[part].loc[mask, 'form'] = '<pad>'
+            morph_tag_data_samples[part].loc[mask, 'morph_idx'] = -1
     return to_sub_token_seq(morph_tag_data_samples, 'tag_id')

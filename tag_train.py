@@ -25,11 +25,11 @@ logging.basicConfig(
 
 schema = "UD"
 # schema = "SPMRL"
-# data_src = "UD_Hebrew"
+data_src = "UD_Hebrew"
 # data_src = "HebrewTreebank"
-data_src = "for_amit_spmrl"
-# tb_name = "HTB"
-tb_name = "hebtb"
+# data_src = "for_amit_spmrl"
+tb_name = "HTB"
+# tb_name = "hebtb"
 raw_root_path = Path(f'data/raw/{data_src}')
 
 # Data
@@ -185,7 +185,7 @@ def morph_eval(decoded_sent_tokens, target_sent_tokens):
 
 
 def print_eval_scores(decoded_df, truth_df, step):
-    aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=['form'])
+    aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=['tag'])
     for fs in aligned_scores:
         p, r, f = aligned_scores[fs]
         print(f'eval {step} aligned {fs}: [P: {p}, R: {r}, F: {f}]')
@@ -205,7 +205,7 @@ def process(model: TaggerModel, data: DataLoader, criterion: nn.CrossEntropyLoss
         batch = tuple(t.to(device) for t in batch)
         batch_scores, batch_targets, batch_token_chars = [], [], []
         batch_sent_ids, batch_num_tokens, batch_target_masks = [], [], []
-        for sent_token_ctx, sent_token_chars, sent_tags in zip(model.embed(batch[0]), batch[1], batch[2]):
+        for sent_token_ctx, sent_token_chars, sent_tags in zip(model.embed_xtokens(batch[0]), batch[1], batch[2]):
             input_token_chars = sent_token_chars[:, :, -1]
             num_tokens = len(sent_token_chars[sent_token_chars[:, 0, 1] > 0])
             target_token_tags = sent_tags[:, :, -1]
@@ -221,8 +221,30 @@ def process(model: TaggerModel, data: DataLoader, criterion: nn.CrossEntropyLoss
             batch_target_mask = torch.eq(target_token_tags[:num_tokens], tag_vocab['tag2index']['</s>'])
             batch_target_mask = ~torch.cumsum(batch_target_mask, dim=-1).bool()
             batch_target_masks.append(batch_target_mask)
-        batch_targets = nn.utils.rnn.pad_sequence(batch_targets, batch_first=True)
+
+        # Decode
         batch_scores = nn.utils.rnn.pad_sequence(batch_scores, batch_first=True)
+        with torch.no_grad():
+            batch_decoded_tags = model.decode(batch_scores)
+            if model.crf is not None:
+                crf_batch_masks = torch.eq(batch_decoded_tags, tag_vocab['tag2index']['</s>'])
+                crf_batch_masks = ~torch.cumsum(crf_batch_masks, dim=2).bool()
+                crf_batch_masked_scores = [scores[mask] for scores, mask in zip(batch_scores, crf_batch_masks)]
+                crf_batch_scores = nn.utils.rnn.pad_sequence(crf_batch_masked_scores, batch_first=True)
+                crf_batch_token_masks = [torch.ones_like(scores[:, 0], dtype=torch.bool)
+                                         for scores in crf_batch_masked_scores]
+                crf_batch_token_masks = nn.utils.rnn.pad_sequence(crf_batch_token_masks, batch_first=True)
+                crf_batch_decoded_tags = model.crf.viterbi_tags(logits=crf_batch_scores, mask=crf_batch_token_masks)
+                for decoded_tags, crf_decoded_tags, crf_mask in zip(batch_decoded_tags, crf_batch_decoded_tags, crf_batch_masks):
+                    idxs_vals = [torch.unique_consecutive(mask, return_counts=True) for mask in crf_mask]
+                    idxs = torch.cat([idx for idx, _ in idxs_vals])
+                    vals = torch.cat([val for _, val in idxs_vals])
+                    decoded_token_tags = torch.split_with_sizes(torch.tensor(crf_decoded_tags[0]), tuple(vals[idxs]))
+                    for idx, token_tags in enumerate(decoded_token_tags):
+                        decoded_tags[idx, :len(token_tags)] = token_tags
+
+        # Loss
+        batch_targets = nn.utils.rnn.pad_sequence(batch_targets, batch_first=True)
         batch_target_masks = nn.utils.rnn.pad_sequence(batch_target_masks, batch_first=True)
         loss_batch_targets = batch_targets.view(-1)
         loss_batch_scores = batch_scores.view(-1, batch_scores.shape[-1])
@@ -247,24 +269,8 @@ def process(model: TaggerModel, data: DataLoader, criterion: nn.CrossEntropyLoss
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
             optimizer.zero_grad()
-        with torch.no_grad():
-            batch_decoded_tags = model.decode(batch_scores)
-            if model.crf is not None:
-                crf_batch_masks = torch.eq(batch_decoded_tags, tag_vocab['tag2index']['</s>'])
-                crf_batch_masks = ~torch.cumsum(crf_batch_masks, dim=2).bool()
-                crf_batch_masked_scores = [scores[mask] for scores, mask in zip(batch_scores, crf_batch_masks)]
-                crf_batch_scores = nn.utils.rnn.pad_sequence(crf_batch_masked_scores, batch_first=True)
-                crf_batch_token_masks = [torch.ones_like(scores[:, 0], dtype=torch.bool)
-                                         for scores in crf_batch_masked_scores]
-                crf_batch_token_masks = nn.utils.rnn.pad_sequence(crf_batch_token_masks, batch_first=True)
-                crf_batch_decoded_tags = model.crf.viterbi_tags(logits=crf_batch_scores, mask=crf_batch_token_masks)
-                for decoded_tags, crf_decoded_tags, crf_mask in zip(batch_decoded_tags, crf_batch_decoded_tags, crf_batch_masks):
-                    idxs_vals = [torch.unique_consecutive(mask, return_counts=True) for mask in crf_mask]
-                    idxs = torch.cat([idx for idx, _ in idxs_vals])
-                    vals = torch.cat([val for _, val in idxs_vals])
-                    decoded_token_tags = torch.split_with_sizes(torch.tensor(crf_decoded_tags[0]), tuple(vals[idxs]))
-                    for idx, token_tags in enumerate(decoded_token_tags):
-                        decoded_tags[idx, :len(token_tags)] = token_tags
+
+        # To Lattice
         for sent_id, input_chars, target_tags, decoded_tags, num_tokens in zip(batch_sent_ids, batch_token_chars,
                                                                                batch_targets, batch_decoded_tags,
                                                                                batch_num_tokens):
@@ -279,6 +285,7 @@ def process(model: TaggerModel, data: DataLoader, criterion: nn.CrossEntropyLoss
             print_decoded_tags.append(decoded_tags)
             print_decoded_lattice_rows.append(decoded_token_lattice_rows)
 
+        # Log Print Eval
         if (i + 1) % print_every == 0:
             sent_id, input_tokens, decoded_tags = print_decoded_lattice_rows[-1]
             target_tags = print_target_tags[-1]
@@ -298,6 +305,8 @@ def process(model: TaggerModel, data: DataLoader, criterion: nn.CrossEntropyLoss
             print_target_tags = []
             print_decoded_tags = []
             print_decoded_lattice_rows = []
+
+    # Log Total Eval
     if print_loss > 0:
         total_loss += print_loss
         total_target_tags.extend(print_target_tags)

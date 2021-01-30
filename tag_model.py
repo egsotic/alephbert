@@ -21,7 +21,7 @@ class TokenTagsDecoder(nn.Module):
                               bidirectional=False,
                               batch_first=False,
                               dropout=self.dec_dropout)
-        self.out = nn.Linear(in_features=self.dec_hidden_size, out_features=self.out_size)
+        self.tag_out = nn.Linear(in_features=self.dec_hidden_size, out_features=self.out_size)
         self.dropout = nn.Dropout(self.out_dropput)
 
     def forward(self, dec_state, sos, eos, max_decode_len, target_tag_seq):
@@ -34,7 +34,7 @@ class TokenTagsDecoder(nn.Module):
             emb_dec_tag = self.tag_emb(dec_tag).unsqueeze(1)
             dec_output, dec_state = self.decoder(emb_dec_tag, dec_state)
             dec_output = self.dropout(dec_output)
-            dec_output = self.out(dec_output)
+            dec_output = self.tag_out(dec_output)
             if target_tag_seq is not None:
                 dec_tag = target_tag_seq[len(dec_scores)].unsqueeze(0)
             else:
@@ -58,8 +58,8 @@ class TaggerModel(nn.Module):
         self.token_decoder = token_decoder
         self.crf = crf
 
-    def embed(self, input_xtokens):
-        mask = torch.ne(input_xtokens[:, :, 1], 0)
+    def embed_xtokens(self, input_xtokens):
+        mask = torch.ne(input_xtokens[:, :, 1], 3)
         # xoutput = self.xmodel(input_xtokens[mask][:, 1].unsqueeze(dim=0))
         xoutput = self.xmodel(input_xtokens[:, :, 1])
         emb_xtokens = xoutput.last_hidden_state

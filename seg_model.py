@@ -30,7 +30,7 @@ class TokenCharSegmentDecoder(nn.Module):
                               bidirectional=False,
                               batch_first=False,
                               dropout=self.dec_dropout)
-        self.out = nn.Linear(in_features=self.dec_hidden_size, out_features=self.out_size)
+        self.char_out = nn.Linear(in_features=self.dec_hidden_size, out_features=self.out_size)
         self.dropout = nn.Dropout(self.out_dropput)
 
     def forward(self, char_seq, enc_state, sos, eos, max_len, target_char_seq):
@@ -46,7 +46,7 @@ class TokenCharSegmentDecoder(nn.Module):
             emb_dec_char = self.char_emb(dec_char).unsqueeze(1)
             dec_output, dec_state = self.decoder(emb_dec_char, dec_state)
             dec_output = self.dropout(dec_output)
-            dec_output = self.out(dec_output)
+            dec_output = self.char_out(dec_output)
             if target_char_seq is not None:
                 dec_char = target_char_seq[len(dec_scores)].unsqueeze(0)
             else:
@@ -71,7 +71,11 @@ class MorphSegModel(nn.Module):
         self.xmodel = xmodel
         self.segment_decoder = segment_decoder
 
-    def embed(self, input_xtokens):
+    @property
+    def embedding_dim(self):
+        return self.xmodel.config.hidden_size
+
+    def embed_xtokens(self, input_xtokens):
         mask = torch.ne(input_xtokens[:, :, 1], 0)
         # xoutput = self.xmodel(input_xtokens[mask][:, 1].unsqueeze(dim=0))
         xoutput = self.xmodel(input_xtokens[:, :, 1])
@@ -86,7 +90,8 @@ class MorphSegModel(nn.Module):
             emb_tokens.append(torch.stack([torch.mean(t, dim=0) for t in token_emb_xtokens], dim=0))
         return emb_tokens
 
-    def forward(self, input_token_context, input_token_chars, special_symbols, num_tokens, max_form_len, target_chars=None):
+    def forward(self, input_token_context, input_token_chars, special_symbols, num_tokens, max_form_len,
+                target_chars=None):
         sos, eos = special_symbols['<s>'], special_symbols['</s>']
         scores, states = [], []
         for cur_token_idx in range(num_tokens):
