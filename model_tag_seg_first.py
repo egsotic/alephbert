@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from seg_model import MorphSegModel
+from model_seg import MorphSegModel
 
 
 class MorphTagger(nn.Module):
 
-    def __init__(self, morph_emb: MorphSegModel, hidden_size, num_layers, dropout, out_size, out_dropout):
+    def __init__(self, morph_emb: MorphSegModel, hidden_size, num_layers, dropout, out_size, out_dropout, crf=None):
         super(MorphTagger, self).__init__()
         self.morph_emb = morph_emb
         self.encoder = nn.LSTM(input_size=morph_emb.embedding_dim,
@@ -17,6 +17,7 @@ class MorphTagger(nn.Module):
                                dropout=dropout)
         self.tag_out = nn.Linear(in_features=self.encoder.hidden_size*2, out_features=out_size)
         self.out_dropout = nn.Dropout(out_dropout)
+        self.crf = crf
 
     def embed_xtokens(self, input_xtokens):
         return self.morph_emb.embed_xtokens(input_xtokens)

@@ -1,119 +1,87 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from transformers.models.bert import BertModel
 
 
-class TokenSeq2SeqMorphTagger(nn.Module):
+class TokenTagsDecoder(nn.Module):
 
-    def __init__(self, char_emb, hidden_size, num_layers, enc_dropout, dec_dropout, out_size, out_dropout, num_labels):
-        super().__init__()
-        self.char_emb = char_emb
-        self.enc_input_size = self.char_emb.embedding_dim
-        self.enc_hidden_size = hidden_size
-        self.enc_num_layers = num_layers
-        self.enc_dropout = enc_dropout
-        self.dec_input_size = self.char_emb.embedding_dim
-        self.dec_hidden_size = hidden_size
-        self.dec_num_layers = num_layers
-        self.dec_dropout = dec_dropout
-        self.out_size = out_size
-        self.out_dropput = out_dropout
-        self.num_labels = num_labels
-        self.encoder = nn.GRU(input_size=self.enc_input_size,
-                              hidden_size=self.enc_hidden_size,
-                              num_layers=self.enc_num_layers,
+    def __init__(self, tag_emb, hidden_size, num_layers, dropout, out_size, out_dropout):
+        super(TokenTagsDecoder, self).__init__()
+        self.tag_emb = tag_emb
+        self.decoder = nn.GRU(input_size=tag_emb.embedding_dim,
+                              hidden_size=hidden_size,
+                              num_layers=num_layers,
                               bidirectional=False,
                               batch_first=False,
-                              dropout=self.enc_dropout)
-        self.decoder = nn.GRU(input_size=self.dec_input_size,
-                              hidden_size=self.dec_hidden_size,
-                              num_layers=self.dec_num_layers,
-                              bidirectional=False,
-                              batch_first=False,
-                              dropout=self.dec_dropout)
-        self.out = nn.Linear(in_features=self.dec_hidden_size, out_features=self.out_size)
-        self.dropout = nn.Dropout(self.out_dropput)
-        self.classifier = nn.Linear(in_features=self.dec_hidden_size, out_features=self.num_labels)
+                              dropout=dropout)
+        self.tag_out = nn.Linear(in_features=self.decoder.hidden_size, out_features=out_size)
+        self.out_dropout = nn.Dropout(out_dropout)
 
-    def forward(self, in_token_char_seq, in_token_state, special_symbols, max_len, max_num_tags, target_char_seq, target_tag_seq):
-        emb_chars = self.char_emb(in_token_char_seq).unsqueeze(1)
-        # hidden = [n layers * n directions, batch size, hidden dim]
-        enc_state = torch.split(in_token_state, in_token_state.shape[2] // self.enc_num_layers, dim=2)
-        enc_state = torch.cat(enc_state, dim=0)
-        enc_output, dec_state = self.encoder(emb_chars, enc_state)
-        dec_char = special_symbols['<s>']
-        dec_char_scores = []
-        dec_label_scores = []
-        while len(dec_char_scores) < max_len and len(dec_label_scores) < max_num_tags:
-            emb_dec_char = self.char_emb(dec_char).unsqueeze(1)
-            dec_output, dec_state = self.decoder(emb_dec_char, dec_state)
-            cur_dec_output = self.dropout(dec_output)
-            cur_dec_char_scores = self.out(cur_dec_output)
-            if target_char_seq is not None:
-                dec_char = target_char_seq[:, len(dec_char_scores), 0]
+    @property
+    def dec_num_layers(self):
+        return self.decoder.num_layers
+
+    def forward(self, dec_state, sos, eos, max_decode_len, target_tag_seq):
+        dec_state = dec_state.view(1, 1, -1)
+        dec_state = torch.split(dec_state, dec_state.shape[2] // self.dec_num_layers, dim=2)
+        dec_state = torch.cat(dec_state, dim=0)
+        dec_tag = sos
+        dec_scores = []
+        while len(dec_scores) < max_decode_len:
+            emb_dec_tag = self.tag_emb(dec_tag).unsqueeze(1)
+            dec_output, dec_state = self.decoder(emb_dec_tag, dec_state)
+            dec_output = self.out_dropout(dec_output)
+            dec_output = self.tag_out(dec_output)
+            if target_tag_seq is not None:
+                dec_tag = target_tag_seq[len(dec_scores)].unsqueeze(0)
             else:
-                dec_char = self.decode(cur_dec_char_scores).squeeze(0)
-            dec_char_scores.append(cur_dec_char_scores)
-            if torch.eq(dec_char, special_symbols['<sep>']):
-                # cur_dec_label_state = self.dropout(dec_state[-1:])
-                # cur_dec_label_scores = self.classifier(cur_dec_label_state)
-                cur_dec_label_scores = self.classifier(cur_dec_output)
-                dec_label_scores.append(cur_dec_label_scores)
-            if torch.all(torch.eq(dec_char, special_symbols['</s>'])):
+                dec_tag = self.decode(dec_output).squeeze(0)
+            dec_scores.append(dec_output)
+            if torch.all(torch.eq(dec_tag, eos)):
                 break
-        if len(dec_label_scores) < max_num_tags:
-            # classifier_output = self.classifier(dec_state[-1:])
-            cur_dec_label_scores = self.classifier(cur_dec_output)
-            dec_label_scores.append(cur_dec_label_scores)
-        fill_len = max_len - len(dec_char_scores)
-        dec_char_scores.extend([dec_char_scores[-1]] * fill_len)
-        fill_len = max_num_tags - len(dec_label_scores)
-        dec_label_scores.extend([dec_label_scores[-1]] * fill_len)
-        return torch.cat(dec_char_scores, dim=1), torch.cat(dec_label_scores, dim=1)
+        fill_len = max_decode_len - len(dec_scores)
+        dec_scores = torch.cat(dec_scores, dim=1)
+        return F.pad(dec_scores, (0, 0, 0, fill_len))
 
     def decode(self, label_scores):
-        return torch.argmax(label_scores, dim=2)
+        return torch.argmax(label_scores, dim=-1)
 
 
-class MorphTagModel(nn.Module):
+class TaggerModel(nn.Module):
 
-    def __init__(self, xmodel, xtokenizer, char_emb, tagger):
-        super().__init__()
+    def __init__(self, xmodel: BertModel, token_decoder: TokenTagsDecoder, crf = None):
+        super(TaggerModel, self).__init__()
         self.xmodel = xmodel
-        self.xtokenizer = xtokenizer
-        self.char_emb = char_emb
-        self.tagger = tagger
+        self.token_decoder = token_decoder
+        self.crf = crf
 
-    def forward(self, xtokens, tokens, special_symbols, max_form_len, max_tag_len, target_form_chars, target_tags):
-        seg_scores = []
-        tag_scores = []
-        mask = xtokens != self.xtokenizer.pad_token_id
-        token_ctx, sent_ctx = self.xmodel(xtokens, attention_mask=mask)
-        cur_token_id = 1
-        token_chars = tokens[tokens[:, :, 0] == cur_token_id]
-        while token_chars.nelement() > 0:
-            xtoken_ids = token_chars[:, 1]
-            token_state = torch.mean(token_ctx[:, xtoken_ids], dim=1).unsqueeze(1)
-            input_chars = token_chars[:, 2]
-            target_char_seq = None
-            if target_form_chars is not None:
-                target_char_seq = target_form_chars[:, (cur_token_id - 1) * max_form_len:cur_token_id * max_form_len]
-            target_tag_seq = None
-            if target_tags is not None:
-                target_tag_seq = target_tags[:, (cur_token_id - 1) * max_tag_len:cur_token_id * max_tag_len]
-            seg_char_scores, seg_tag_scores = self.tagger(input_chars, token_state, special_symbols, max_form_len, max_tag_len, target_char_seq, target_tag_seq)
-            seg_scores.append(seg_char_scores)
-            tag_scores.append(seg_tag_scores)
-            cur_token_id += 1
-            token_chars = tokens[tokens[:, :, 0] == cur_token_id]
-        seg_scores = torch.cat(seg_scores, dim=1)
-        tag_scores = torch.cat(tag_scores, dim=1)
-        return seg_scores, tag_scores
+    def embed_xtokens(self, input_xtokens):
+        mask = torch.ne(input_xtokens[:, :, 1], 3)
+        # xoutput = self.xmodel(input_xtokens[mask][:, 1].unsqueeze(dim=0))
+        xoutput = self.xmodel(input_xtokens[:, :, 1])
+        emb_xtokens = xoutput.last_hidden_state
+        emb_tokens = []
+        for i in range(len(input_xtokens)):
+            # # groupby token_id
+            # mask = torch.ne(input_xtokens[i, :, 1], 0)
+            idxs, vals = torch.unique_consecutive(input_xtokens[i, :, 0][mask[i]], return_counts=True)
+            token_emb_xtokens = torch.split_with_sizes(emb_xtokens[i][mask[i]], tuple(vals))
+            # token_xcontext = {k.item(): v for k, v in zip(idxs, [torch.mean(t, dim=0) for t in token_emb_xtokens])}
+            emb_tokens.append(torch.stack([torch.mean(t, dim=0) for t in token_emb_xtokens], dim=0))
+        return emb_tokens
 
-    def char_loss_prepare(self, dec_char_scores, gold_chars):
-        return dec_char_scores[0], gold_chars[0, :, 0]
-
-    def tag_loss_prepare(self, dec_tag_scores, gold_tags):
-        return dec_tag_scores[0], gold_tags[0, :, 0]
+    def forward(self, input_token_context, special_symbols, num_tokens, max_num_token_tags, target_token_tags=None):
+        sos, eos = special_symbols['<s>'], special_symbols['</s>']
+        scores = []
+        for cur_token_idx in range(num_tokens):
+            cur_token_state = input_token_context[cur_token_idx + 1]
+            target_tags = None
+            if target_token_tags is not None:
+                target_tags = target_token_tags[cur_token_idx]
+            token_scores = self.token_decoder(cur_token_state, sos, eos, max_num_token_tags, target_tags)
+            scores.append(token_scores)
+        return torch.cat(scores, dim=0)
 
     def decode(self, label_scores):
-        return torch.argmax(label_scores, dim=2)
+        return torch.argmax(label_scores, dim=-1)

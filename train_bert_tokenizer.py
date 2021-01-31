@@ -2,8 +2,6 @@ import logging
 from pathlib import Path
 from tokenizers import ByteLevelBPETokenizer, CharBPETokenizer, BertWordPieceTokenizer
 
-# tokenizer_type = 'bpe-byte'
-# tokenizer_type = 'bpe-char'
 tokenizer_type = 'wordpiece'
 
 
@@ -38,8 +36,8 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# vocab_size = 52000
-vocab_size = 2000
+vocab_size = 52000
+# vocab_size = 2000
 paths = [str(x) for x in Path("data/raw").glob("oscar/he_dedup≥.txt")]
 tokenizer = train_tokenizer(paths, vocab_size)
 tokenizer.save_model(f'./experiments/tokenizers/{tokenizer_type}-{vocab_size}')

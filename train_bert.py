@@ -7,7 +7,6 @@ from transformers.trainer import Trainer
 from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
 from transformers.models.bert.modeling_bert import BertForMaskedLM
-import torch
 
 
 def get_config(vocab_size, num_hidden_layers=6):
@@ -31,10 +30,6 @@ def get_model(vocab_size):
     return BertForMaskedLM(config=config)
 
 
-# def encode(examples):
-#     return tokenizer(examples['text'], truncation=True)
-
-
 def get_train_data1(tokenizer):
     p = Path('data/raw/oscar') / f'he_dedup-1000.txt'
     logger.info(f'training data: {p}')
@@ -52,10 +47,8 @@ def get_train_data(max_length):
 
     def tokenize_function(examples):
         examples["text"] = [line for line in examples["text"] if len(line) > 0 and not line.isspace()]
-        # batch_encoding = tokenizer(examples["text"], add_special_tokens=True, truncation=True, return_special_tokens_mask=True, max_length=max_length)
-        # batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=True)
-        batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=False, return_length=True, return_token_type_ids=False, return_attention_mask=False)
-        # examples['input_ids'] = [{"input_ids": torch.tensor(e, dtype=torch.long)} for e in batch_encoding["input_ids"]]
+        batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=False,
+                                   return_length=True, return_token_type_ids=False, return_attention_mask=False)
         return batch_encoding
 
     return ds.map(
@@ -97,9 +90,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-
-# tokenizer_type = 'bpe-byte'
-# tokenizer_type = 'bpe-char'
 tokenizer_type = 'wordpiece'
 vocab_size = 52000
 training_args = get_train_args()

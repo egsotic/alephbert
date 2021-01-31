@@ -8,8 +8,9 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import BertModel
 from data import preprocess_morph_seg, preprocess_morph_tag
-from seg_model import TokenCharSegmentDecoder, MorphSegModel
-from seg_tag_model import MorphTagger
+from model_seg import TokenCharSegmentDecoder, MorphSegModel
+from model_tag_seg_first import MorphTagger
+from conditional_random_field import ConditionalRandomField, allowed_transitions
 from collections import Counter
 import pandas as pd
 from bclm import treebank as tb
@@ -109,8 +110,13 @@ seg_dec = TokenCharSegmentDecoder(char_emb=char_emb, hidden_size=hidden_size, nu
                                   dropout=dropout, out_size=num_chars, out_dropout=out_dropout)
 morph_model = MorphSegModel(bert, seg_dec)
 # morph_model.load_state_dict(torch.load(Path('./experiments/morph-seg/bert/distilled/wordpiece/bert-distilled-wordpiece-oscar-52000/UD_Hebrew/HTB/model-state.pt')))
+if data_src == "for_amit_spmrl":
+    crf = ConditionalRandomField(num_tags=num_tags, constraints=allowed_transitions(constraint_type="BIOSE",
+                                                                                    labels=tag_vocab['index2tag']))
+else:
+    crf = ConditionalRandomField(num_tags=num_tags)
 morph_tagger_model = MorphTagger(morph_emb=morph_model, hidden_size=hidden_size, num_layers=num_layers,
-                                 dropout=dropout, out_size=num_tags, out_dropout=out_dropout)
+                                 dropout=dropout, out_size=num_tags, out_dropout=out_dropout, crf=crf)
 device = None
 if device is not None:
     morph_tagger_model.to(device)
@@ -259,6 +265,21 @@ def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss
         batch_tag_scores = nn.utils.rnn.pad_sequence(batch_tag_scores, batch_first=True)
         with torch.no_grad():
             batch_decoded_chars, batch_decoded_tags = model.decode(batch_form_scores, batch_tag_scores)
+            if model.crf is not None:
+                crf_batch_masks = torch.ne(batch_decoded_tags, tag_special_symbols['<pad>'])
+                crf_batch_masked_scores = [scores[mask] for scores, mask in zip(batch_tag_scores, crf_batch_masks)]
+                crf_batch_tag_scores = nn.utils.rnn.pad_sequence(crf_batch_masked_scores, batch_first=True)
+                # crf_batch_tag_masks = [torch.ones_like(scores[:, 0], dtype=torch.bool) for scores in crf_batch_masked_scores]
+                crf_batch_tag_masks = [mask[mask] for mask in crf_batch_masks]
+                crf_batch_tag_masks = nn.utils.rnn.pad_sequence(crf_batch_tag_masks, batch_first=True)
+                crf_batch_decoded_tags = model.crf.viterbi_tags(logits=crf_batch_tag_scores, mask=crf_batch_tag_masks)
+                for decoded_tags, crf_decoded_tags, crf_mask in zip(batch_decoded_tags, crf_batch_decoded_tags, crf_batch_masks):
+                    idxs_vals = [torch.unique_consecutive(mask, return_counts=True) for mask in crf_mask]
+                    idxs = torch.cat([idx for idx, _ in idxs_vals])
+                    vals = torch.cat([val for _, val in idxs_vals])
+                    decoded_token_tags = torch.split_with_sizes(torch.tensor(crf_decoded_tags[0]), tuple(vals[idxs]))
+                    for idx, token_tags in enumerate(decoded_token_tags):
+                        decoded_tags[idx, :len(token_tags)] = token_tags
 
         # Loss
         batch_form_targets = nn.utils.rnn.pad_sequence(batch_form_targets, batch_first=True)
@@ -273,11 +294,26 @@ def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss
         loss_batch_tag_scores = batch_tag_scores.view(-1, batch_tag_scores.shape[-1])
         tag_loss = criterion(loss_batch_tag_scores, loss_batch_tag_targets)
         print_tag_loss += tag_loss.item()
+        crf_loss = None
+        if model.crf is not None:
+            crf_batch_masks = torch.ne(batch_tag_targets, tag_special_symbols['<pad>'])
+            crf_batch_tag_masked_targets = [target[mask] for target, mask in zip(batch_tag_targets, crf_batch_masks)]
+            crf_batch_tag_masked_scores = [scores[mask] for scores, mask in zip(batch_tag_scores, crf_batch_masks)]
+            crf_loss_batch_tag_targets = nn.utils.rnn.pad_sequence(crf_batch_tag_masked_targets, batch_first=True)
+            crf_loss_batch_tag_scores = nn.utils.rnn.pad_sequence(crf_batch_tag_masked_scores, batch_first=True)
+            crf_loss_batch_tag_mask = torch.ne(crf_loss_batch_tag_targets, tag_pad)
+            crf_log_likelihood = model.crf(inputs=crf_loss_batch_tag_scores, tags=crf_loss_batch_tag_targets,
+                                           mask=crf_loss_batch_tag_mask)
+            crf_log_likelihood /= torch.sum(crf_loss_batch_tag_mask)
+            crf_loss = -crf_log_likelihood
 
         # Optimization Step
         if optimizer is not None:
             form_loss.backward(retain_graph=True)
-            tag_loss.backward()
+            # tag_loss.backward()
+            tag_loss.backward(retain_graph=crf_loss is not None)
+            if crf_loss is not None:
+                crf_loss.backward()
             if max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
@@ -353,6 +389,9 @@ def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss
     aligned_scores, mset_scores = morph_eval(total_decoded_forms, total_target_forms)
     print(aligned_scores)
     print(mset_scores)
+    aligned_scores, mset_scores = morph_eval(total_decoded_tags, total_target_tags)
+    print(aligned_scores)
+    print(mset_scores)
     return get_morph_seg_tag_lattice_data(total_decoded_lattice_rows)
 
 
@@ -372,10 +411,10 @@ teacher_forcing_ratio = 1.0
 # Training epochs
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
-    morph_model.train()
-    process(morph_tagger_model, train_dataloader, loss_fct, epoch, 'train', 100, teacher_forcing_ratio, adam,
+    morph_tagger_model.train()
+    process(morph_tagger_model, train_dataloader, loss_fct, epoch, 'train', 10, teacher_forcing_ratio, adam,
             max_grad_norm)
-    morph_model.eval()
+    morph_tagger_model.eval()
     with torch.no_grad():
         dev_samples = process(morph_tagger_model, dev_dataloader, loss_fct, epoch, 'dev', 1)
         print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], step=epoch)
