@@ -1,3 +1,4 @@
+import csv
 import random
 import logging
 from pathlib import Path
@@ -13,8 +14,7 @@ from model_tag_seg_first import MorphTagger
 from conditional_random_field import ConditionalRandomField, allowed_transitions
 from collections import Counter
 import pandas as pd
-from bclm import treebank as tb
-
+from bclm import treebank as tb, ne_evaluate_mentions
 
 # Logging setup
 logger = logging.getLogger(__name__)
@@ -228,6 +228,14 @@ def print_eval_scores(decoded_df, truth_df, step):
         print(f'eval {step} mset    {fs}: [P: {p}, R: {r}, F: {f}]')
 
 
+def save_ner(df, out_file_path):
+    gb = df.groupby('sent_id')
+    for sid, group in gb:
+        group[['form', 'tag']].to_csv(out_file_path, mode='a', header=False, index=False, sep=' ', quoting=csv.QUOTE_NONE)
+        with open(out_file_path, 'a', newline = '\n') as f:
+            f.write('\n')
+
+
 # Training and evaluation routine
 def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss, epoch, phase, print_every,
             teacher_forcing_ratio=0.0, optimizer=None, max_grad_norm=None):
@@ -301,7 +309,7 @@ def process(model: MorphTagger, data: DataLoader, criterion: nn.CrossEntropyLoss
             crf_batch_tag_masked_scores = [scores[mask] for scores, mask in zip(batch_tag_scores, crf_batch_masks)]
             crf_loss_batch_tag_targets = nn.utils.rnn.pad_sequence(crf_batch_tag_masked_targets, batch_first=True)
             crf_loss_batch_tag_scores = nn.utils.rnn.pad_sequence(crf_batch_tag_masked_scores, batch_first=True)
-            crf_loss_batch_tag_mask = torch.ne(crf_loss_batch_tag_targets, tag_pad)
+            crf_loss_batch_tag_mask = torch.ne(crf_loss_batch_tag_targets, tag_special_symbols['<pad>'])
             crf_log_likelihood = model.crf(inputs=crf_loss_batch_tag_scores, tags=crf_loss_batch_tag_targets,
                                            mask=crf_loss_batch_tag_mask)
             crf_log_likelihood /= torch.sum(crf_loss_batch_tag_mask)
@@ -408,6 +416,8 @@ adam = optim.AdamW(parameters, lr=lr)
 loss_fct = nn.CrossEntropyLoss(ignore_index=0)
 teacher_forcing_ratio = 1.0
 
+out_path = Path(f'experiments/morph-seg-ner/bert/distilled/wordpiece/{bert_version}/UD_Hebrew/HTB')
+out_path.mkdir(parents=True, exist_ok=True)
 # Training epochs
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
@@ -418,5 +428,11 @@ for i in trange(epochs, desc="Epoch"):
     with torch.no_grad():
         dev_samples = process(morph_tagger_model, dev_dataloader, loss_fct, epoch, 'dev', 1)
         print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], step=epoch)
+        save_ner(dev_samples, out_path / 'morph_label_dev.bmes')
+        dev_gold_file_path = 'data/raw/for_amit_spmrl/hebtb/gold/morph_gold_dev.bmes'
+        print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, out_path / 'morph_label_dev.bmes'))
         test_samples = process(morph_tagger_model, test_dataloader, loss_fct, epoch, 'test', 1)
         print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], step=epoch)
+        save_ner(test_samples, out_path / 'morph_label_test.bmes')
+        test_gold_file_path = 'data/raw/for_amit_spmrl/hebtb/gold/morph_gold_test.bmes'
+        print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, out_path / 'morph_label_test.bmes'))

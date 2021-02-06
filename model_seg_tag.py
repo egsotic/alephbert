@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model_seg import MorphSegModel
+from model_seg import MorphSegmentModel
 
 
-class MorphTagger(nn.Module):
+class MorphTagModel(nn.Module):
 
-    def __init__(self, morph_emb: MorphSegModel, hidden_size, num_layers, dropout, out_size, out_dropout, crf=None):
-        super(MorphTagger, self).__init__()
+    def __init__(self, morph_emb: MorphSegmentModel, hidden_size, num_layers, dropout, out_size, out_dropout, crf=None):
+        super(MorphTagModel, self).__init__()
         self.morph_emb = morph_emb
         self.encoder = nn.LSTM(input_size=morph_emb.embedding_dim,
                                hidden_size=hidden_size,
@@ -22,23 +22,23 @@ class MorphTagger(nn.Module):
     def embed_xtokens(self, input_xtokens):
         return self.morph_emb.embed_xtokens(input_xtokens)
 
-    def forward(self, input_token_context, input_token_chars, special_symbols, num_tokens, max_form_len, max_num_tags,  target_chars=None):
-        sos = special_symbols['</s>']
+    def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, max_num_tags, target_chars=None):
+        eos = special_symbols['</s>']
         sep = special_symbols['<sep>']
-        morph_scores, morph_states = self.morph_emb(input_token_context, input_token_chars, special_symbols, num_tokens, max_form_len, target_chars)
+        morph_scores, morph_states = self.morph_emb(xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, target_chars)
         if target_chars is not None:
             morph_chars = target_chars
         else:
             morph_chars = self.morph_emb.decode(morph_scores).squeeze(0)
 
-        sos_mask = torch.eq(morph_chars[:num_tokens], sos)
-        sos_mask[:, -1] = True
-        sos_mask = torch.bitwise_and(torch.eq(torch.cumsum(sos_mask, dim=1), 1), sos_mask)
+        eos_mask = torch.eq(morph_chars[:num_tokens], eos)
+        eos_mask[:, -1] = True
+        eos_mask = torch.bitwise_and(torch.eq(torch.cumsum(eos_mask, dim=1), 1), eos_mask)
 
         sep_mask = torch.eq(morph_chars[:num_tokens], sep)
-        sep_mask = torch.bitwise_and(torch.eq(torch.cumsum(sos_mask, dim=1), 0), sep_mask)
+        sep_mask = torch.bitwise_and(torch.eq(torch.cumsum(eos_mask, dim=1), 0), sep_mask)
 
-        tag_mask = torch.bitwise_or(sos_mask, sep_mask)
+        tag_mask = torch.bitwise_or(eos_mask, sep_mask)
         tag_states = morph_states[tag_mask]
         enc_tag_scores, _ = self.encoder(tag_states.unsqueeze(dim=1))
         enc_tag_scores = self.out_dropout(enc_tag_scores)

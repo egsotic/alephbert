@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from model_base import BertTokenEmbeddingModel
 
 
-class TokenCharSegmentDecoder(nn.Module):
+class TokenSegmentDecoder(nn.Module):
 
     def __init__(self, char_emb, hidden_size, num_layers, dropout, out_size, out_dropout):
-        super(TokenCharSegmentDecoder, self).__init__()
+        super(TokenSegmentDecoder, self).__init__()
         self.char_emb = char_emb
         self.encoder = nn.GRU(input_size=char_emb.embedding_dim,
                               hidden_size=hidden_size,
@@ -20,8 +21,8 @@ class TokenCharSegmentDecoder(nn.Module):
                               bidirectional=False,
                               batch_first=False,
                               dropout=dropout)
-        self.char_out = nn.Linear(in_features=self.decoder.hidden_size, out_features=out_size)
         self.out_dropout = nn.Dropout(out_dropout)
+        self.char_out = nn.Linear(in_features=self.decoder.hidden_size, out_features=out_size)
 
     @property
     def enc_num_layers(self):
@@ -62,39 +63,24 @@ class TokenCharSegmentDecoder(nn.Module):
         return torch.argmax(label_scores, dim=-1)
 
 
-class MorphSegModel(nn.Module):
+class MorphSegmentModel(nn.Module):
 
-    def __init__(self, xmodel, segment_decoder):
-        super(MorphSegModel, self).__init__()
-        self.xmodel = xmodel
+    def __init__(self, xtoken_emb: BertTokenEmbeddingModel, segment_decoder: TokenSegmentDecoder):
+        super(MorphSegmentModel, self).__init__()
+        self.xtoken_emb = xtoken_emb
         self.segment_decoder = segment_decoder
 
     @property
     def embedding_dim(self):
         return self.xmodel.config.hidden_size
 
-    def embed_xtokens(self, input_xtokens):
-        mask = torch.ne(input_xtokens[:, :, 1], 0)
-        # xoutput = self.xmodel(input_xtokens[mask][:, 1].unsqueeze(dim=0))
-        xoutput = self.xmodel(input_xtokens[:, :, 1])
-        emb_xtokens = xoutput.last_hidden_state
-        emb_tokens = []
-        for i in range(len(input_xtokens)):
-            # # groupby token_id
-            # mask = torch.ne(input_xtokens[i, :, 1], 0)
-            idxs, vals = torch.unique_consecutive(input_xtokens[i, :, 0][mask[i]], return_counts=True)
-            token_emb_xtoken_split = torch.split_with_sizes(emb_xtokens[i][mask[i]], tuple(vals))
-            # token_xcontext = {k.item(): v for k, v in zip(idxs, [torch.mean(t, dim=0) for t in token_emb_xtokens])}
-            emb_tokens.append(torch.stack([torch.mean(t, dim=0) for t in token_emb_xtoken_split], dim=0))
-        return emb_tokens
-
-    def forward(self, input_token_context, input_token_chars, special_symbols, num_tokens, max_form_len,
-                target_chars=None):
+    def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, target_chars=None):
+        token_ctx = self.xtoken_emb(xtoken_seq)
         sos, eos = special_symbols['<s>'], special_symbols['</s>']
         scores, states = [], []
         for cur_token_idx in range(num_tokens):
-            cur_token_state = input_token_context[cur_token_idx + 1]
-            cur_input_chars = input_token_chars[cur_token_idx]
+            cur_token_state = token_ctx[cur_token_idx + 1]
+            cur_input_chars = char_seq[cur_token_idx]
             cur_target_chars = None
             if target_chars is not None:
                 cur_target_chars = target_chars[cur_token_idx]
