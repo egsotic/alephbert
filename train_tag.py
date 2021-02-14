@@ -95,8 +95,8 @@ logging.info('BERT model and tokenizer loaded')
 char_vectors, char_vocab, tag_vocab, _ = preprocess_morph_tag.load_morph_vocab(preprocessed_data_root_path, partition,
                                                                                include_eos=True)
 char_emb = nn.Embedding.from_pretrained(torch.tensor(char_vectors, dtype=torch.float), freeze=False,
-                                        padding_idx=char_vocab['char2index']['<pad>'])
-num_tags = len(tag_vocab['tag2index'])
+                                        padding_idx=char_vocab['char2id']['<pad>'])
+num_tags = len(tag_vocab['tag2id'])
 tag_emb = nn.Embedding(num_embeddings=num_tags, embedding_dim=50, padding_idx=0)
 num_layers = 2
 hidden_size = bert.config.hidden_size // num_layers
@@ -105,7 +105,7 @@ out_dropout = 0.5
 tag_dec = TokenTagsDecoder(tag_emb, hidden_size, num_layers, dropout, num_tags, out_dropout)
 if data_src == "for_amit_spmrl":
     crf = ConditionalRandomField(num_tags=num_tags, constraints=allowed_transitions(constraint_type="BIOSE",
-                                                                                    labels=tag_vocab['index2tag']))
+                                                                                    labels=tag_vocab['id2tag']))
 else:
     crf = ConditionalRandomField(num_tags=num_tags)
 tagger_model = TaggerModel(bert, tag_dec, crf)
@@ -115,16 +115,16 @@ if device is not None:
 print(tagger_model)
 
 # Special symbols
-sos = torch.tensor([tag_vocab['tag2index']['<s>']], dtype=torch.long)
-eos = torch.tensor([tag_vocab['tag2index']['</s>']], dtype=torch.long)
-pad = torch.tensor([tag_vocab['tag2index']['<pad>']], dtype=torch.long)
+sos = torch.tensor([tag_vocab['tag2id']['<s>']], dtype=torch.long)
+eos = torch.tensor([tag_vocab['tag2id']['</s>']], dtype=torch.long)
+pad = torch.tensor([tag_vocab['tag2id']['<pad>']], dtype=torch.long)
 special_symbols = {'<s>': sos.to(device), '</s>': eos.to(device), '<pad>': pad.to(device)}
 
 
 def to_sent_tokens(token_chars):
     tokens = []
     for chars in token_chars:
-        token = ''.join([char_vocab['index2char'][c] for c in chars[chars > 0].tolist()])
+        token = ''.join([char_vocab['id2char'][c] for c in chars[chars > 0].tolist()])
         tokens.append(token)
     return tokens
 
@@ -136,7 +136,7 @@ def to_sent_token_tags(sent_token_tags):
     for i, token_tags in enumerate(sent_token_tags):
         token_len = token_mask_map[i] if i in token_mask_map else sent_token_tags.shape[1]
         token_tags = token_tags[:token_len]
-        tags = [tag_vocab['index2tag'][t.item()] for t in token_tags]
+        tags = [tag_vocab['id2tag'][t.item()] for t in token_tags]
         tokens.append(tags)
     return tokens
 

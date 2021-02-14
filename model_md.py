@@ -17,8 +17,7 @@ class BertTokenEmbeddingModel(nn.Module):
 
     def forward(self, token_seq):
         mask = torch.ne(token_seq[:, :, 1], self.bert_tokenizer.pad_token_id)
-        # xoutput = self.bert(input_xtokens[mask][:, 1].unsqueeze(dim=0))
-        bert_output = self.bert(token_seq[:, :, 1])
+        bert_output = self.bert(token_seq[:, :, 1], attention_mask=mask)
         bert_emb_tokens = bert_output.last_hidden_state
         emb_tokens = []
         for i in range(len(token_seq)):
@@ -50,16 +49,16 @@ class SegmentDecoder(nn.Module):
                                    batch_first=False,
                                    dropout=dropout)
         self.char_dropout = nn.Dropout(char_dropout)
-        self.char_out = nn.Linear(in_features=self.decoder.hidden_size, out_features=char_out_size)
-        self.classifiers = [nn.Linear(in_features=hidden_size, out_features=num) for num in num_labels]
+        self.char_out = nn.Linear(in_features=self.char_decoder.hidden_size, out_features=char_out_size)
+        self.classifiers = [nn.Linear(in_features=self.char_out.out_features, out_features=num) for num in num_labels]
 
     @property
     def enc_num_layers(self):
-        return self.encoder.num_layers
+        return self.char_encoder.num_layers
 
     @property
     def dec_num_layers(self):
-        return self.decoder.num_layers
+        return self.char_decoder.num_layers
 
     def forward(self, char_seq, enc_state, special_symbols, max_out_char_seq_len, target_char_seq, max_num_labels):
         char_scores, char_states, label_scores = [], [], []
@@ -101,13 +100,13 @@ class SegmentDecoder(nn.Module):
         enc_state = enc_state.view(1, 1, -1)
         enc_state = torch.split(enc_state, enc_state.shape[2] // self.enc_num_layers, dim=2)
         enc_state = torch.cat(enc_state, dim=0)
-        enc_output, enc_state = self.encoder(emb_chars, enc_state)
+        enc_output, enc_state = self.char_encoder(emb_chars, enc_state)
         return enc_output, enc_state
 
     def decoder_step_(self, cur_dec_char, dec_char_state, target_char_seq, num_scores, sep):
         emb_dec_char = self.char_emb(cur_dec_char).unsqueeze(1)
-        dec_char_output, dec_char_state = self.decoder(emb_dec_char, dec_char_state)
-        dec_char_output = self.out_dropout(dec_char_output)
+        dec_char_output, dec_char_state = self.char_decoder(emb_dec_char, dec_char_state)
+        dec_char_output = self.char_dropout(dec_char_output)
         dec_char_output = self.char_out(dec_char_output)
         if target_char_seq is not None:
             next_dec_char = target_char_seq[num_scores].unsqueeze(0)
@@ -126,10 +125,10 @@ class SegmentDecoder(nn.Module):
         return torch.argmax(label_scores, dim=-1)
 
 
-class MorphSegmentModel(nn.Module):
+class MorphSequenceModel(nn.Module):
 
     def __init__(self, xtoken_emb: BertTokenEmbeddingModel, segment_decoder: SegmentDecoder):
-        super(MorphSegmentModel, self).__init__()
+        super(MorphSequenceModel, self).__init__()
         self.xtoken_emb = xtoken_emb
         self.segment_decoder = segment_decoder
 
@@ -139,7 +138,7 @@ class MorphSegmentModel(nn.Module):
 
     def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
                 target_chars=None):
-        token_ctx = self.xtoken_emb(xtoken_seq)
+        token_ctx = self.xtoken_emb(xtoken_seq.unsqueeze(dim=0))[0]
         out_char_scores, out_char_states = [], []
         out_label_scores = []
         for _ in self.segment_decoder.classifiers:
@@ -156,43 +155,40 @@ class MorphSegmentModel(nn.Module):
             out_char_scores.append(cur_token_segment_scores)
             out_char_states.append(cur_token_segment_states)
             for out_scores, seg_scores in zip(out_label_scores, cur_token_label_scores):
-                out_scores.extend(seg_scores)
+                out_scores.append(seg_scores)
         out_char_scores = torch.cat(out_char_scores, dim=0)
         out_char_states = torch.cat(out_char_states, dim=0)
         out_label_scores = [torch.cat(label_scores, dim=0) for label_scores in out_label_scores]
         return out_char_scores, out_char_states, out_label_scores
 
-    def decode(self, morph_seg_scores, label_scores):
-        return self.morph_emb.decode(morph_seg_scores), [torch.argmax(scores, dim=-1) for scores in label_scores]
+    def decode(self, morph_seg_scores, label_scores: list):
+        return self.segment_decoder.decode(morph_seg_scores), [torch.argmax(scores, dim=-1) for scores in label_scores]
 
 
-class MorphTagModel(nn.Module):
+class MorphPipelineModel(MorphSequenceModel):
 
-    def __init__(self, morph_emb: MorphSegmentModel, hidden_size, num_layers, dropout, out_size, out_dropout, crf=None):
-        super(MorphTagModel, self).__init__()
-        self.morph_emb = morph_emb
-        self.encoder = nn.LSTM(input_size=morph_emb.embedding_dim,
+    def __init__(self, xtoken_emb: BertTokenEmbeddingModel, segment_decoder: SegmentDecoder, hidden_size, num_layers,
+                 dropout, seg_dropout, num_labels: list):
+        super(MorphPipelineModel, self).__init__(xtoken_emb, segment_decoder)
+        self.encoder = nn.LSTM(input_size=xtoken_emb.embedding_dim,
                                hidden_size=hidden_size,
                                num_layers=num_layers,
                                bidirectional=True,
                                batch_first=False,
                                dropout=dropout)
-        self.tag_out = nn.Linear(in_features=self.encoder.hidden_size*2, out_features=out_size)
-        self.out_dropout = nn.Dropout(out_dropout)
-        self.crf = crf
+        self.seg_dropout = nn.Dropout(seg_dropout)
+        self.classifiers = [nn.Linear(in_features=hidden_size*2, out_features=num) for num in num_labels]
 
-    def embed_xtokens(self, input_xtokens):
-        return self.morph_emb.embed_xtokens(input_xtokens)
-
-    def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, max_num_tags, target_chars=None):
-        eos = special_symbols['</s>']
-        sep = special_symbols['<sep>']
-        morph_scores, morph_states = self.morph_emb(xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, target_chars)
+    def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
+                target_chars=None):
+        morph_scores, morph_states, _ = super().forward(xtoken_seq, char_seq, special_symbols, num_tokens,
+                                                        max_form_len, max_num_labels, target_chars)
         if target_chars is not None:
             morph_chars = target_chars
         else:
-            morph_chars = self.morph_emb.decode(morph_scores).squeeze(0)
-
+            morph_chars, _ = self.morph_emb.decode(morph_scores, [])
+            morph_chars = morph_chars.squeeze(0)
+        eos, sep = special_symbols['</s>'], special_symbols['<sep>']
         eos_mask = torch.eq(morph_chars[:num_tokens], eos)
         eos_mask[:, -1] = True
         eos_mask = torch.bitwise_and(torch.eq(torch.cumsum(eos_mask, dim=1), 1), eos_mask)
@@ -200,19 +196,16 @@ class MorphTagModel(nn.Module):
         sep_mask = torch.eq(morph_chars[:num_tokens], sep)
         sep_mask = torch.bitwise_and(torch.eq(torch.cumsum(eos_mask, dim=1), 0), sep_mask)
 
-        tag_mask = torch.bitwise_or(eos_mask, sep_mask)
-        tag_states = morph_states[tag_mask]
-        enc_tag_scores, _ = self.encoder(tag_states.unsqueeze(dim=1))
-        enc_tag_scores = self.out_dropout(enc_tag_scores)
-        tag_scores = self.tag_out(enc_tag_scores)
-
-        tag_sizes = torch.sum(tag_mask, dim=1)
-        tag_scores = torch.split_with_sizes(tag_scores.squeeze(dim=1), tuple(tag_sizes))
-
-        tag_scores = nn.utils.rnn.pad_sequence(tag_scores, batch_first=True)
-        fill_len = max_num_tags - tag_scores.shape[1]
-        tag_scores = F.pad(tag_scores, (0, 0, 0, fill_len))
-        return morph_scores, tag_scores
-
-    def decode(self, morph_label_scores, tag_label_scores):
-        return self.morph_emb.decode(morph_label_scores), torch.argmax(tag_label_scores, dim=-1)
+        seg_state_mask = torch.bitwise_or(eos_mask, sep_mask)
+        seg_states = morph_states[seg_state_mask]
+        enc_seg_scores, _ = self.encoder(seg_states.unsqueeze(dim=1))
+        enc_seg_scores = self.seg_dropout(enc_seg_scores)
+        label_scores = []
+        seg_sizes = torch.sum(seg_state_mask, dim=1)
+        for classifier in self.classifiers:
+            scores = classifier(enc_seg_scores)
+            scores = torch.split_with_sizes(scores.squeeze(dim=1), tuple(seg_sizes))
+            scores = nn.utils.rnn.pad_sequence(scores, batch_first=True)
+            fill_len = max_num_labels - scores.shape[1]
+            label_scores.append(F.pad(scores, (0, 0, 0, fill_len)))
+        return morph_scores, morph_states, label_scores

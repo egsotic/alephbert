@@ -54,7 +54,7 @@ def _load_vec_file(path: Path) -> (dict, list):
     return word_indices, vectors
 
 
-def load_word_vectors(vec_file_path: Path):
+def load_word_vectors(vec_file_path: Path) -> (np.array, dict):
     logging.info(f'Loading FastText vectors from {vec_file_path}')
     word2index, vectors = _load_vec_file(vec_file_path)
     word_vectors = np.array([vectors[word2index[word]] for word in word2index], dtype=np.float)

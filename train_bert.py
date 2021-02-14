@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from datasets import load_dataset
 from transformers import BertConfig, TrainingArguments, set_seed
-from transformers.data.datasets import LineByLineTextDataset
+# from transformers.data.datasets import LineByLineTextDataset
 from transformers.trainer import Trainer
 from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
@@ -12,7 +12,7 @@ from transformers.models.bert.modeling_bert import BertForMaskedLM
 def get_config(vocab_size, num_hidden_layers=6):
     return BertConfig(
         vocab_size=vocab_size,
-        max_position_embeddings=514,
+        max_position_embeddings=512,
         num_attention_heads=12,
         num_hidden_layers=num_hidden_layers,
         type_vocab_size=1,
@@ -22,7 +22,7 @@ def get_config(vocab_size, num_hidden_layers=6):
 def get_tokenizer(vocab_size):
     pretrained_tokenizer_path = Path('experiments/tokenizers') / f'{tokenizer_type}-{vocab_size}'
     logger.info(f'loading tokenizer from {pretrained_tokenizer_path}')
-    return BertTokenizerFast.from_pretrained(str(pretrained_tokenizer_path), max_len=514)
+    return BertTokenizerFast.from_pretrained(str(pretrained_tokenizer_path), max_len=512)
 
 
 def get_model(vocab_size):
@@ -30,14 +30,14 @@ def get_model(vocab_size):
     return BertForMaskedLM(config=config)
 
 
-def get_train_data1(tokenizer):
-    p = Path('data/raw/oscar') / f'he_dedup-1000.txt'
-    logger.info(f'training data: {p}')
-    return LineByLineTextDataset(
-        tokenizer=tokenizer,
-        file_path=str(p),
-        block_size=128,
-    )
+# def get_train_data1(tokenizer):
+#     p = Path('data/raw/oscar') / f'he_dedup-1000.txt'
+#     logger.info(f'training data: {p}')
+#     return LineByLineTextDataset(
+#         tokenizer=tokenizer,
+#         file_path=str(p),
+#         block_size=128,
+#     )
 
 
 def get_train_data(max_length):
