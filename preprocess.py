@@ -1,5 +1,5 @@
 from data.preprocess_form import *
-from data.preprocess_labels2 import *
+from data.preprocess_labels import *
 from bclm import treebank as tb
 from hebrew_root_tokenizer import AlefBERTRootTokenizer
 
@@ -22,7 +22,8 @@ if __name__ == '__main__':
     # vocab_size = 10000
     corpus_name = 'oscar'
     bert_model_size = 'distilled'
-    # bert_version = 'mbert'
+    # bert_version = 'mBERT'
+    # bert_version = 'mBERT-cased'
     # bert_version = 'heBERT'
     bert_version = f'bert-{bert_model_size}-{tokenizer_type}-{corpus_name}-{vocab_size}'
 
@@ -54,12 +55,12 @@ if __name__ == '__main__':
     bert_root_path = Path(f'./experiments/transformers/bert/{bert_model_size}/{tokenizer_type}/{bert_version}')
     if tokenizer_type == 'roots':
         bert_tokenizer = AlefBERTRootTokenizer(str(bert_root_path / 'vocab.txt'))
-    elif bert_version == 'mbert':
+    elif bert_version == 'mBERT':
         bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-uncased')
-    elif bert_version == 'mbert-cased':
+    elif bert_version == 'mBERT-cased':
         bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-cased')
-    elif bert_version == 'hebert':
-        bert_tokenizer = BertTokenizerFast.from_pretrained('avichr/heBERT')
+    elif bert_version == 'heBERT':
+        bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_version}')
     else:
         bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_root_path))
 

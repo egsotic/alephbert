@@ -50,7 +50,7 @@ class SegmentDecoder(nn.Module):
                                    dropout=dropout)
         self.char_dropout = nn.Dropout(char_dropout)
         self.char_out = nn.Linear(in_features=self.char_decoder.hidden_size, out_features=char_out_size)
-        self.classifiers = [nn.Linear(in_features=self.char_out.out_features, out_features=num) for num in num_labels]
+        self.classifiers = nn.ModuleList([nn.Linear(in_features=self.char_out.out_features, out_features=num) for num in num_labels])
 
     @property
     def enc_num_layers(self):
@@ -177,7 +177,7 @@ class MorphPipelineModel(MorphSequenceModel):
                                batch_first=False,
                                dropout=dropout)
         self.seg_dropout = nn.Dropout(seg_dropout)
-        self.classifiers = [nn.Linear(in_features=hidden_size*2, out_features=num) for num in num_labels]
+        self.classifiers = nn.ModuleList([nn.Linear(in_features=hidden_size*2, out_features=num) for num in num_labels])
 
     def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
                 target_chars=None):

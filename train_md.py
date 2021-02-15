@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import BertModel, BertTokenizerFast
-from data import preprocess_form, preprocess_labels2
+from data import preprocess_form, preprocess_labels
 from model_md import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
 from collections import Counter
 import pandas as pd
@@ -24,11 +24,11 @@ logging.basicConfig(
 )
 
 # Config
-tb_schema = "UD"
-# schema = "SPMRL"
+# tb_schema = "UD"
+tb_schema = "SPMRL"
 # tb_data_src = "UD_Hebrew"
-tb_data_src = "for_amit_spmrl"
-# tb_data_src = "HebrewTreebank"
+# tb_data_src = "for_amit_spmrl"
+tb_data_src = "HebrewTreebank"
 # tb_name = "HTB"
 tb_name = "hebtb"
 
@@ -38,9 +38,9 @@ bert_vocab_size = 52000
 # bert_vocab_size = 10000
 bert_corpus_name = 'oscar'
 bert_model_type = 'distilled'
-# bert_version = 'hebert'
-# bert_version = 'mbert'
-# bert_version = 'mbert-cased'
+# bert_version = 'heBERT'
+# bert_version = 'mBERT'
+# bert_version = 'mBERT-cased'
 bert_version = f'bert-{bert_model_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
 
 # md_strategry = "morph-pipeline"
@@ -66,7 +66,7 @@ def load_preprocessed_data_samples(data_root_path, partition, label_names) -> di
     xtoken_data = preprocess_form.load_xtoken_data(data_root_path, partition)
     token_char_data = preprocess_form.load_token_char_data(data_root_path, partition)
     form_char_data = preprocess_form.load_form_data(data_root_path, partition)
-    label_data = preprocess_labels2.load_labeled_data(data_root_path, partition, label_names=label_names)
+    label_data = preprocess_labels.load_labeled_data(data_root_path, partition, label_names=label_names)
     datasets = {}
     for part in partition:
         xtoken_tensor = torch.tensor(xtoken_data[part][:, :, 1:], dtype=torch.long)
@@ -79,11 +79,11 @@ def load_preprocessed_data_samples(data_root_path, partition, label_names) -> di
 
 datasets = {}
 # label_names = ['tag']
-label_names = ['tag', 'ner']
+# label_names = ['tag', 'ner']
 # label_names = ['tag', 'Gender', 'Number', 'Person', 'Tense']
-# label_names = None
+label_names = None
 if label_names is None:
-    label_names = preprocess_labels2.get_label_names(preprocessed_data_root_path, partition)
+    label_names = preprocess_labels.get_label_names(preprocessed_data_root_path, partition)
 data_samples_file_paths = {part: preprocessed_data_root_path / f'{part}_form_labels_data_samples.pt' for part in partition}
 if all([data_samples_file_paths[part].exists() for part in data_samples_file_paths]):
     for part in partition:
@@ -96,9 +96,9 @@ else:
         file_path = data_samples_file_paths[part]
         logging.info(f'Saving {tb_schema} form labels tensor dataset to file {file_path}')
         torch.save(datasets[part], file_path)
-# datasets['train'] = TensorDataset(*[t[:10] for t in datasets['train'].tensors])
-# datasets['dev'] = TensorDataset(*[t[:100] for t in datasets['dev'].tensors])
-# datasets['test'] = TensorDataset(*[t[:100] for t in datasets['test'].tensors])
+datasets['train'] = TensorDataset(*[t[:10] for t in datasets['train'].tensors])
+datasets['dev'] = TensorDataset(*[t[:100] for t in datasets['dev'].tensors])
+datasets['test'] = TensorDataset(*[t[:100] for t in datasets['test'].tensors])
 train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=False)
 dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
 test_dataloader = DataLoader(datasets['test'], batch_size=100)
@@ -109,18 +109,18 @@ if bert_tokenizer_type == 'roots':
     logging.info(f'Loading roots tokenizer BERT from: {str(bert_folder_path)}')
     bert_tokenizer = AlefBERTRootTokenizer(str(bert_folder_path / 'vocab.txt'))
     bert = BertModel.from_pretrained(str(bert_folder_path))
-elif bert_version == 'mbert':
-    logging.info(f'Loading mBERT')
+elif bert_version == 'mBERT':
+    logging.info(f'Loading {bert_version}')
     bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-uncased')
     bert = BertModel.from_pretrained('bert-base-multilingual-uncased')
-elif bert_version == 'mbert-cased':
-    logging.info(f'Loading mBERT cased')
+elif bert_version == 'mBERT-cased':
+    logging.info(f'Loading {bert_version}')
     bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-cased')
     bert = BertModel.from_pretrained('bert-base-multilingual-cased')
-elif bert_version == 'hebert':
-    logging.info(f'Loading heBERT')
-    bert_tokenizer = BertTokenizerFast.from_pretrained('avichr/heBERT')
-    bert = BertModel.from_pretrained('avichr/heBERT')
+elif bert_version == 'heBERT':
+    logging.info(f'Loading {bert_version}')
+    bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_version}')
+    bert = BertModel.from_pretrained(f'avichr/{bert_version}')
 else:
     logging.info(f'Loading BERT from: {str(bert_folder_path)}')
     bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
@@ -129,8 +129,8 @@ logging.info('BERT model and tokenizer loaded')
 
 # MD Model
 pad, sos, eos, sep = '<pad>', '<s>', '</s>', '<sep>'
-char_vectors, char_vocab = preprocess_labels2.load_char_vocab(preprocessed_data_root_path)
-label_vocab = preprocess_labels2.load_label_vocab(preprocessed_data_root_path, partition, pad=pad)
+char_vectors, char_vocab = preprocess_labels.load_char_vocab(preprocessed_data_root_path)
+label_vocab = preprocess_labels.load_label_vocab(preprocessed_data_root_path, partition, pad=pad)
 char_tensors = torch.tensor(char_vectors, dtype=torch.float)
 char_emb_pad_id = char_vocab['char2id'][pad]
 char_emb = nn.Embedding.from_pretrained(char_tensors, freeze=False, padding_idx=char_emb_pad_id)
@@ -214,7 +214,8 @@ def to_feats_strs(labels: dict) -> list:
     feature_values = [labels[feat_name] for feat_name in feature_names]
     feature_values = [f for f in itertools.zip_longest(*feature_values, fillvalue='_')]
     for fvalues in feature_values:
-        feats_str = '|'.join([f'{feature_names[j]}={fvalues[j]}' for j in range(len(feature_names))])
+        fstrs = [f'{feature_names[j]}={fvalues[j]}' for j in range(len(feature_names)) if fvalues[j] != '_']
+        feats_str = '|'.join(fstrs) if len(fstrs) > 0 else '_'
         feats_strs.append(feats_str)
     return feats_strs
 
@@ -417,11 +418,12 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
             print(f'form mset scores: {mset_scores}')
 
             for j in range(len(label_names)):
-                decoded_values = [labels[j] for sent_labels in print_decoded_labels for labels in sent_labels]
-                target_values = [labels[j] for sent_labels in print_target_labels for labels in sent_labels]
-                aligned_scores, mset_scores = morph_eval(decoded_values, target_values)
-                print(f'{label_names[j]} aligned scores: {aligned_scores}')
-                print(f'{label_names[j]} mset scores: {mset_scores}')
+                if label_names[j][:3].lower() in ['tag', 'ner', 'gen', 'num', 'per', 'ten']:
+                    decoded_values = [labels[j] for sent_labels in print_decoded_labels for labels in sent_labels]
+                    target_values = [labels[j] for sent_labels in print_target_labels for labels in sent_labels]
+                    aligned_scores, mset_scores = morph_eval(decoded_values, target_values)
+                    print(f'{label_names[j]} aligned scores: {aligned_scores}')
+                    print(f'{label_names[j]} mset scores: {mset_scores}')
 
             print_target_forms = []
             print_target_labels = []
@@ -439,6 +441,7 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
         total_target_forms.extend(print_target_forms)
         total_target_labels.extend(print_target_labels)
         total_decoded_lattice_rows.extend(print_decoded_lattice_rows)
+
     print(f'epoch {epoch} {phase}, total form char loss: {total_form_loss / len(data)}')
     for j in range(len(label_names)):
         print(f'epoch {epoch} {phase}, total {label_names[j]} loss: {total_label_losses[j] / len(data)}')
@@ -447,14 +450,15 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
     print(f'form total aligned scores: {aligned_scores}')
     print(f'form total mset scores: {mset_scores}')
 
-    total_decoded_labels = list(map(list, zip(*total_decoded_labels)))
-    total_target_labels = list(map(list, zip(*total_target_labels)))
+    # total_decoded_labels = list(map(list, zip(*total_decoded_labels)))
+    # total_target_labels = list(map(list, zip(*total_target_labels)))
     for j in range(len(label_names)):
-        decoded_values = [labels[j] for sent_labels in total_decoded_labels for labels in sent_labels]
-        target_values = [labels[j] for sent_labels in total_target_labels for labels in sent_labels]
-        aligned_scores, mset_scores = morph_eval(decoded_values, target_values)
-        print(f'{label_names[j]} total aligned scores: {aligned_scores}')
-        print(f'{label_names[j]} total mset scores: {mset_scores}')
+        if label_names[j][:3].lower() in ['tag', 'ner', 'gen', 'num', 'per', 'ten']:
+            decoded_values = [labels[j] for sent_labels in total_decoded_labels for labels in sent_labels]
+            target_values = [labels[j] for sent_labels in total_target_labels for labels in sent_labels]
+            aligned_scores, mset_scores = morph_eval(decoded_values, target_values)
+            print(f'{label_names[j]} total aligned scores: {aligned_scores}')
+            print(f'{label_names[j]} total mset scores: {mset_scores}')
 
     return get_lattice_data(total_decoded_lattice_rows)
 
