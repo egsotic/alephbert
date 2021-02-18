@@ -40,12 +40,11 @@ bert_corpus_name = 'oscar'
 bert_model_type = 'distilled'
 # bert_version = 'heBERT'
 # bert_version = 'mBERT'
-# bert_version = 'mBERT-cased'
 bert_version = f'bert-{bert_model_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
 
-# md_strategry = "morph-pipeline"
-md_strategry = "morph-sequence"
-# md_strategry = "morph-segment-only"
+md_strategry = "morph-pipeline"
+# md_strategry = "morph-sequence"
+# md_strategry = "segment-only"
 
 # Data
 raw_root_path = Path(f'data/raw/{tb_data_src}')
@@ -111,12 +110,8 @@ if bert_tokenizer_type == 'roots':
     bert = BertModel.from_pretrained(str(bert_folder_path))
 elif bert_version == 'mBERT':
     logging.info(f'Loading {bert_version}')
-    bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-uncased')
-    bert = BertModel.from_pretrained('bert-base-multilingual-uncased')
-elif bert_version == 'mBERT-cased':
-    logging.info(f'Loading {bert_version}')
-    bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-cased')
-    bert = BertModel.from_pretrained('bert-base-multilingual-cased')
+    bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual')
+    bert = BertModel.from_pretrained('bert-base-multilingual')
 elif bert_version == 'heBERT':
     logging.info(f'Loading {bert_version}')
     bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_version}')
@@ -267,21 +262,22 @@ def morph_eval(decoded_sent_tokens, target_sent_tokens) -> (tuple, tuple):
     return aligned_scores, mset_scores
 
 
-def print_eval_scores(decoded_df, truth_df, fields, step):
+def print_eval_scores(decoded_df, truth_df, fields, phase, step):
     aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=fields)
-    for fs in aligned_scores:
-        p, r, f = aligned_scores[fs]
-        print(f'eval {step} aligned {fs}: [P: {p}, R: {r}, F: {f}]')
+    for fs in mset_scores:
+        # p, r, f = aligned_scores[fs]
+        # print(f'{phase} step {step} aligned {fs} eval scores: [P: {p}, R: {r}, F: {f}]')
         p, r, f = mset_scores[fs]
-        print(f'eval {step} mset    {fs}: [P: {p}, R: {r}, F: {f}]')
+        print(f'{phase} step {step} mset {fs} eval scores   : [P: {p}, R: {r}, F: {f}]')
 
 
 def save_ner(df, out_file_path):
     gb = df.groupby('sent_id')
     with open(out_file_path, 'w') as f:
         for sid, group in gb:
-            for row in group[['form', 'tag']].itertuples():
-                f.write(f'{row.form} {row.tag}\n')
+            for row in group[['form', 'feats']].itertuples():
+                feats = {feat.split('=')[0]: feat.split('=')[1] for feat in row.feats.split('|')}
+                f.write(f"{row.form} {feats['ner']}\n")
             f.write('\n')
 
 
@@ -390,17 +386,17 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
             decoded_segments = print_decoded_forms[-1]
             decoded_labels = print_decoded_labels[-1]
 
-            print(f'epoch {epoch} {phase}, step {i + 1} form char loss: {print_form_loss / print_every}')
+            print(f'epoch {epoch} {phase}, batch {i + 1} form char loss: {print_form_loss / print_every}')
             for j in range(len(label_names)):
-                print(f'epoch {epoch} {phase}, step {i + 1} {label_names[j]} loss: {print_label_losses[j] / print_every}')
-            print(f'sent #{sent_id} input tokens  : {input_tokens}')
-            print(f'sent #{sent_id} target forms  : {list(reversed(target_segments))}')
-            print(f'sent #{sent_id} decoded forms : {list(reversed(decoded_segments))}')
+                print(f'epoch {epoch} {phase}, batch {i + 1} {label_names[j]} loss: {print_label_losses[j] / print_every}')
+            print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} input tokens  : {input_tokens}')
+            print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} target forms  : {list(reversed(target_segments))}')
+            print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} decoded forms : {list(reversed(decoded_segments))}')
             for j in range(len(label_names)):
-                label_values = [labels[j] for labels in target_labels]
-                print(f'sent #{sent_id} target {label_names[j]} labels  : {list(reversed([label_values]))}')
-                label_values = [labels[j] for labels in decoded_labels]
-                print(f'sent #{sent_id} decoded {label_names[j]} labels : {list(reversed([label_values]))}')
+                target_values = [labels[j] for labels in target_labels]
+                print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} target {label_names[j]} labels  : {list(reversed([target_values]))}')
+                decoded_values = [labels[j] for labels in decoded_labels]
+                print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} decoded {label_names[j]} labels : {list(reversed([decoded_values]))}')
             total_form_loss += print_form_loss
             for j, label_loss in enumerate(print_label_losses):
                 total_label_losses[j] += label_loss
@@ -414,16 +410,16 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
             total_decoded_lattice_rows.extend(print_decoded_lattice_rows)
 
             aligned_scores, mset_scores = morph_eval(print_decoded_forms, print_target_forms)
-            print(f'form aligned scores: {aligned_scores}')
-            print(f'form mset scores: {mset_scores}')
+            # print(f'epoch {epoch} {phase}, batch {i + 1} form aligned scores: {aligned_scores}')
+            print(f'epoch {epoch} {phase}, batch {i + 1} form mset scores: {mset_scores}')
 
             for j in range(len(label_names)):
                 if label_names[j][:3].lower() in ['tag', 'ner', 'gen', 'num', 'per', 'ten']:
                     decoded_values = [labels[j] for sent_labels in print_decoded_labels for labels in sent_labels]
                     target_values = [labels[j] for sent_labels in print_target_labels for labels in sent_labels]
                     aligned_scores, mset_scores = morph_eval(decoded_values, target_values)
-                    print(f'{label_names[j]} aligned scores: {aligned_scores}')
-                    print(f'{label_names[j]} mset scores: {mset_scores}')
+                    # print(f'epoch {epoch} {phase}, batch {i + 1} {label_names[j]} aligned scores: {aligned_scores}')
+                    print(f'epoch {epoch} {phase}, batch {i + 1} {label_names[j]} mset scores: {mset_scores}')
 
             print_target_forms = []
             print_target_labels = []
@@ -446,19 +442,20 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
     for j in range(len(label_names)):
         print(f'epoch {epoch} {phase}, total {label_names[j]} loss: {total_label_losses[j] / len(data)}')
 
-    aligned_scores, mset_scores = morph_eval(total_decoded_forms, total_target_forms)
-    print(f'form total aligned scores: {aligned_scores}')
-    print(f'form total mset scores: {mset_scores}')
+    # aligned_scores, mset_scores = morph_eval(total_decoded_forms, total_target_forms)
+    # # print(f'epoch {epoch} {phase}, total form total aligned scores: {aligned_scores}')
+    # print(f'epoch {epoch} {phase}, total form total mset scores: {mset_scores}')
 
     # total_decoded_labels = list(map(list, zip(*total_decoded_labels)))
     # total_target_labels = list(map(list, zip(*total_target_labels)))
-    for j in range(len(label_names)):
-        if label_names[j][:3].lower() in ['tag', 'ner', 'gen', 'num', 'per', 'ten']:
-            decoded_values = [labels[j] for sent_labels in total_decoded_labels for labels in sent_labels]
-            target_values = [labels[j] for sent_labels in total_target_labels for labels in sent_labels]
-            aligned_scores, mset_scores = morph_eval(decoded_values, target_values)
-            print(f'{label_names[j]} total aligned scores: {aligned_scores}')
-            print(f'{label_names[j]} total mset scores: {mset_scores}')
+
+    # for j in range(len(label_names)):
+    #     if label_names[j][:3].lower() in ['tag', 'ner', 'gen', 'num', 'per', 'ten']:
+    #         decoded_values = [labels[j] for sent_labels in total_decoded_labels for labels in sent_labels]
+    #         target_values = [labels[j] for sent_labels in total_target_labels for labels in sent_labels]
+    #         aligned_scores, mset_scores = morph_eval(decoded_values, target_values)
+    #         # print(f'epoch {epoch} {phase}, total {label_names[j]} aligned scores: {aligned_scores}')
+    #         print(f'epoch {epoch} {phase}, total {label_names[j]} mset scores: {mset_scores}')
 
     return get_lattice_data(total_decoded_lattice_rows)
 
@@ -476,7 +473,7 @@ adam = optim.AdamW(parameters, lr=lr)
 loss_fct = nn.CrossEntropyLoss(ignore_index=0)
 teacher_forcing_ratio = 1.0
 
-out_path = Path(f'experiments/morph-seg-ner/bert/distilled/wordpiece/{bert_version}/UD_Hebrew/HTB')
+out_path = Path(f'experiments/morph-seg-labels/bert/distilled/wordpiece/{bert_version}/{tb_data_src}/{tb_name}')
 out_path.mkdir(parents=True, exist_ok=True)
 eval_fields = ['form']
 if 'tag' in label_names:
@@ -493,9 +490,13 @@ for i in trange(epochs, desc="Epoch"):
     md_model.eval()
     with torch.no_grad():
         dev_samples = process(md_model, dev_dataloader, loss_fct, epoch, 'dev', 1)
-        print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], step=epoch, fields=eval_fields)
+        dev_samples.to_csv(out_path / 'dev_samples.csv')
+        print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], phase='dev', step=epoch,
+                          fields=eval_fields)
         test_samples = process(md_model, test_dataloader, loss_fct, epoch, 'test', 1)
-        print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], step=epoch, fields=eval_fields)
+        test_samples.to_csv(out_path / 'test_samples.csv')
+        print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='dev', step=epoch,
+                          fields=eval_fields)
 
         if 'ner' in label_names:
             save_ner(dev_samples, out_path / 'morph_label_dev.bmes')

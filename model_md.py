@@ -186,7 +186,7 @@ class MorphPipelineModel(MorphSequenceModel):
         if target_chars is not None:
             morph_chars = target_chars
         else:
-            morph_chars, _ = self.morph_emb.decode(morph_scores, [])
+            morph_chars, _ = self.decode(morph_scores, [])
             morph_chars = morph_chars.squeeze(0)
         eos, sep = special_symbols['</s>'], special_symbols['<sep>']
         eos_mask = torch.eq(morph_chars[:num_tokens], eos)

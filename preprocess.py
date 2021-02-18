@@ -23,7 +23,6 @@ if __name__ == '__main__':
     corpus_name = 'oscar'
     bert_model_size = 'distilled'
     # bert_version = 'mBERT'
-    # bert_version = 'mBERT-cased'
     # bert_version = 'heBERT'
     bert_version = f'bert-{bert_model_size}-{tokenizer_type}-{corpus_name}-{vocab_size}'
 
@@ -31,34 +30,32 @@ if __name__ == '__main__':
     tb_root_path = dev_root_path / 'onlplab'
 
     # tb_root_path = tb_root_path / 'UniversalDependencies'
-    tb_root_path = tb_root_path / 'HebrewResources/for_amit_spmrl'
-    # tb_root_path = tb_root_path / 'HebrewResources/HebrewTreebank'
+    # tb_root_path = tb_root_path / 'HebrewResources/for_amit_spmrl'
+    tb_root_path = tb_root_path / 'HebrewResources/HebrewTreebank'
 
     # raw_root_path = Path('data/raw/UD_Hebrew')
-    raw_root_path = Path('data/raw/for_amit_spmrl')
-    # raw_root_path = Path('data/raw/HebrewTreebank')
+    # raw_root_path = Path('data/raw/for_amit_spmrl')
+    raw_root_path = Path('data/raw/HebrewTreebank')
 
     # preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{bert_version}')
-    preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{bert_version}')
-    # preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{bert_version}')
+    # preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{bert_version}')
+    preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{bert_version}')
     preprocessed_root_path.mkdir(parents=True, exist_ok=True)
 
     if not raw_root_path.exists():
         # raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path)
-        raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb', tb_root_path)
-        # raw_partition = tb.spmrl(raw_root_path, 'hebtb', tb_root_path)
+        # raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb', tb_root_path)
+        raw_partition = tb.spmrl(raw_root_path, 'hebtb', tb_root_path)
     else:
         # raw_partition = tb.ud(raw_root_path, 'HTB')
-        raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb')
-        # raw_partition = tb.spmrl(raw_root_path, 'hebtb')
+        # raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb')
+        raw_partition = tb.spmrl(raw_root_path, 'hebtb')
 
     bert_root_path = Path(f'./experiments/transformers/bert/{bert_model_size}/{tokenizer_type}/{bert_version}')
     if tokenizer_type == 'roots':
         bert_tokenizer = AlefBERTRootTokenizer(str(bert_root_path / 'vocab.txt'))
     elif bert_version == 'mBERT':
         bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-uncased')
-    elif bert_version == 'mBERT-cased':
-        bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-cased')
     elif bert_version == 'heBERT':
         bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_version}')
     else:

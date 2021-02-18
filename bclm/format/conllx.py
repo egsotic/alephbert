@@ -1,3 +1,4 @@
+from collections import defaultdict
 from copy import copy
 import logging
 import pandas as pd
@@ -13,12 +14,29 @@ LATTICE_COLUMN_NAMES = ['START', 'END', 'FORM', 'LEMMA', 'CPOSTAG', 'FPOSTAG', '
 # _lattice_fields = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
 
 
+def _fix_feats(feats_str: str) -> str:
+    features = defaultdict(set)
+    for feat in feats_str.split('|'):
+        parts = feat.split('=')
+        if len(parts) == 2:
+            features[parts[0]].add(parts[1])
+    feats = []
+    for fname in sorted(features):
+        fvalue = ''.join(sorted(features[fname]))
+        feat_str = f'{fname}={fvalue}'
+        feats.append(feat_str)
+    if len(feats) == 0:
+        return '_'
+    return '|'.join(feats)
+
+
 def _build_conllx_sample_rows(sent_id, lattice, tokens, is_gold):
     rows = []
     for morpheme in lattice:
         sample_row = copy(morpheme)
         sample_row[0] = int(sample_row[0])  # Start
         sample_row[1] = int(sample_row[1])  # End
+        sample_row[6] = _fix_feats(sample_row[6])
         del sample_row[5]  # Remove FPOSTAG, keep CPOSTAG
         sample_row[-1] = int(sample_row[-1])  # TokenId
         sample_row.append(tokens[sample_row[-1]])  # Token
@@ -28,7 +46,7 @@ def _build_conllx_sample_rows(sent_id, lattice, tokens, is_gold):
     return rows
 
 
-def _load_conllx_partition_df(lattice_sentences, token_sentences, is_gold):
+def _get_conllx_partition_df(lattice_sentences, token_sentences, is_gold):
     partition = []
     for i, (lattice, tokens) in enumerate(zip(lattice_sentences, token_sentences)):
         sent_id = i + 1
@@ -54,7 +72,7 @@ def load_conllx(tb_root_path, partition, tb_name, ma_name):
         lattice_sentences = split_sentences(lattices_path)
         token_sentences = split_sentences(tokens_path)
         # lattices = _load_partition_lattices(lattice_sentences, token_sentences, ma_name is None)
-        lattices_df = _load_conllx_partition_df(lattice_sentences, token_sentences, ma_name is None)
+        lattices_df = _get_conllx_partition_df(lattice_sentences, token_sentences, ma_name is None)
         # lattices = lattices_df.groupby(lattices_df.sent_id)
         # lattices = [lattices.get_group(x) for x in lattices.groups]
         # logging.info(f'{file_name} lattices: {len(lattices)}')
