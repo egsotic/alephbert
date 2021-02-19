@@ -1,5 +1,4 @@
 from copy import copy
-import logging
 import pandas as pd
 import unicodedata
 from .utils import split_sentences, lattice_fields
@@ -62,7 +61,6 @@ def _load_conllu_partition_df(lattice_sentences, is_gold):
         lattice = [line.replace("\t\t", "\t_\t").replace("\t\t", "\t_\t").split('\t') for line in lattice if line[0] != '#']
         # Bug fix - clean unicode characters
         lattice = _normalize_lattice(lattice)
-        # lattice = [line.split() for line in lattice]
         partition.extend(_build_conllu_sample_rows(sent_id, lattice, is_gold))
     return pd.DataFrame(partition, columns=lattice_fields)
 
@@ -75,9 +73,7 @@ def load_conllu(tb_path, partition, lang, la_name, tb_name, ma_name=None):
             lattices_path = tb_path / f'conllul/UL_{lang}-{tb_name}' / f'{file_name}.{ma_name}.conllul'
         else:
             lattices_path = tb_path / f'UD_{lang}-{tb_name}' / f'{file_name}.conllu'
-        # print(f'loading {lattices_path.stem} treebank file')
         lattice_sentences = split_sentences(lattices_path)
         lattices_df = _load_conllu_partition_df(lattice_sentences, ma_name is None)
-        # print(f'{partition_type} lattices: {len(lattices)}')
         treebank[partition_type] = lattices_df
     return treebank

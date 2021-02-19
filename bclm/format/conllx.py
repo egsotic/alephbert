@@ -1,4 +1,3 @@
-from collections import defaultdict
 from copy import copy
 import logging
 import pandas as pd
@@ -10,33 +9,15 @@ from .utils import split_sentences, lattice_fields
 # FPOSTAG = Fine grained Part of Speech tag (language specific)
 LATTICE_COLUMN_NAMES = ['START', 'END', 'FORM', 'LEMMA', 'CPOSTAG', 'FPOSTAG', 'FEATS', 'TOKEN_ID']
 
+
 # We transform the SPMRL lattice format into an enriched normalized format including sentence id, token and gold flag
-# _lattice_fields = ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
-
-
-def _fix_feats(feats_str: str) -> str:
-    features = defaultdict(set)
-    for feat in feats_str.split('|'):
-        parts = feat.split('=')
-        if len(parts) == 2:
-            features[parts[0]].add(parts[1])
-    feats = []
-    for fname in sorted(features):
-        fvalue = ''.join(sorted(features[fname]))
-        feat_str = f'{fname}={fvalue}'
-        feats.append(feat_str)
-    if len(feats) == 0:
-        return '_'
-    return '|'.join(feats)
-
-
+# ['sent_id', 'from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'feats', 'token_id', 'token', 'is_gold']
 def _build_conllx_sample_rows(sent_id, lattice, tokens, is_gold):
     rows = []
     for morpheme in lattice:
         sample_row = copy(morpheme)
         sample_row[0] = int(sample_row[0])  # Start
         sample_row[1] = int(sample_row[1])  # End
-        sample_row[6] = _fix_feats(sample_row[6])
         del sample_row[5]  # Remove FPOSTAG, keep CPOSTAG
         sample_row[-1] = int(sample_row[-1])  # TokenId
         sample_row.append(tokens[sample_row[-1]])  # Token
@@ -62,16 +43,12 @@ def load_conllx(tb_root_path, partition, tb_name, ma_name):
         file_name = f'{partition_type}_{tb_name}'.lower()
         logging.info(f'loading {file_name} dataset')
         if ma_name is not None:
-            # lattices_path = tb_root_path / f'HebrewTreebank' / tb_name / f'{file_name}.lattices'
             lattices_path = tb_root_path / tb_name / f'{file_name}.lattices'
         else:
-            # lattices_path = tb_root_path / f'HebrewTreebank' / tb_name / f'{file_name}-gold.lattices'
             lattices_path = tb_root_path / tb_name / f'{file_name}-gold.lattices'
-        # tokens_path = tb_root_path / f'HebrewTreebank' / tb_name / f'{file_name}.tokens'
         tokens_path = tb_root_path / tb_name / f'{file_name}.tokens'
         lattice_sentences = split_sentences(lattices_path)
         token_sentences = split_sentences(tokens_path)
-        # lattices = _load_partition_lattices(lattice_sentences, token_sentences, ma_name is None)
         lattices_df = _get_conllx_partition_df(lattice_sentences, token_sentences, ma_name is None)
         # lattices = lattices_df.groupby(lattices_df.sent_id)
         # lattices = [lattices.get_group(x) for x in lattices.groups]

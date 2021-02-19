@@ -15,28 +15,8 @@ def _insert_morph_id_column(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _reformat_ner_lattice(morph_df: pd.DataFrame) -> pd.DataFrame:
-    logging.info(f'reformat NER Lattice')
-    rows = []
-    tag_column_index = morph_df.columns.get_loc('tag')
-    feats_column_index = morph_df.columns.get_loc('feats')
-    for values in morph_df.itertuples():
-        ner = values.tag
-        feats = values.feats.split('|')
-        tag = feats[-1].split('=')[-1]
-        feats = feats[:-1] + [f'ner={ner}']
-        feats = '|'.join(feats)
-        new_values = list(values[1:])
-        new_values[tag_column_index] = tag
-        new_values[feats_column_index] = feats
-        rows.append(new_values)
-    return pd.DataFrame(rows, columns=morph_df.columns)
-
-
 def _get_morph_df(raw_lattice_df: pd.DataFrame) -> pd.DataFrame:
     morph_df = raw_lattice_df[['sent_id', 'token_id', 'token', 'form', 'lemma', 'tag', 'feats']]
-    if 'tag' in morph_df.feats.head(1).item():
-        morph_df = _reformat_ner_lattice(morph_df)
     morph_df = _insert_morph_id_column(morph_df)
     return morph_df
 
@@ -89,7 +69,8 @@ def _collate_xtokens(xtoken_df: pd.DataFrame, xtokenizer: BertTokenizerFast, pad
         sent_token_index.extend([-1] * pad_len)
         sent_xtokens.extend([xtokenizer.pad_token] * pad_len)
         sent_xtoken_ids.extend([xtokenizer.pad_token_id] * pad_len)
-        data_rows.extend(list(row) for row in zip(sent_index, sent_token_index, sent_tokens, sent_xtokens, sent_xtoken_ids))
+        data_rows.extend(list(row)
+                         for row in zip(sent_index, sent_token_index, sent_tokens, sent_xtokens, sent_xtoken_ids))
         tq.update(1)
     tq.close()
     return pd.DataFrame(data_rows, columns=['sent_idx', 'token_idx', 'token', 'xtoken', 'xtoken_id'])
