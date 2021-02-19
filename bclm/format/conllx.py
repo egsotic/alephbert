@@ -1,7 +1,7 @@
 from copy import copy
 import logging
 import pandas as pd
-from .utils import split_sentences, lattice_fields
+from .format_utils import split_sentences, lattice_fields
 
 # SPMRL Lattice format is described in "Input Formats" section of the SPMRL14 shared task description:
 # http://dokufarm.phil.hhu.de/spmrl2014/doku.php?id=shared_task_description

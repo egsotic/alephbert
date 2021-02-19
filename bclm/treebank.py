@@ -3,7 +3,6 @@ from pathlib import Path
 import pandas as pd
 import logging
 import itertools
-import csv
 from bclm.format import conllx, conllu
 from bclm import ne_evaluate_mentions
 
@@ -26,7 +25,6 @@ def _unify_multi_value_feats(feats_str: str) -> str:
 
 
 def _fix_spmrl_lattice_multivalue_feats(lattice_df: pd.DataFrame) -> pd.DataFrame:
-    logging.info(f'fixing multivalue features')
     rows = []
     feats_column_index = lattice_df.columns.get_loc('feats')
     for values in lattice_df.itertuples():
@@ -51,45 +49,6 @@ def _switch_tag_and_feature(lattice_df: pd.DataFrame, feat_name: str) -> pd.Data
     return lattice_df
 
 
-# switch back tag and ner values
-# def _reformat_ner_lattice(lattice_df: pd.DataFrame) -> pd.DataFrame:
-#     ner = lattice_df.tag
-#     feats = [{ff.split('=')[0]: ff.split('=')[1] for ff in f.split('|')} for f in lattice_df['feats'].tolist()]
-#     tags = [f['tag'] for f in feats]
-#     for f, n in zip(feats, ner):
-#         f['ner'] = n
-#         f.pop('ner', None)
-#     feats = ['|'.join([f'{k}={f[k]}' for k in f]) for f in feats]
-#     lattice_df['tag'] = tags
-#     lattice_df['feats'] = feats
-#     return lattice_df
-    # logging.info(f'reformat NER Lattice')
-    # rows = []
-    # tag_column_index = lattice_df.columns.get_loc('tag')
-    # feats_column_index = lattice_df.columns.get_loc('feats')
-    # for values in lattice_df.itertuples():
-    #     ner = values.tag
-    #     feats = values.feats.split('|')
-    #     tag = feats[-1].split('=')[-1]
-    #     feats = feats[:-1] + [f'ner={ner}']
-    #     feats = '|'.join(feats)
-    #     new_values = list(values[1:])
-    #     new_values[tag_column_index] = tag
-    #     new_values[feats_column_index] = feats
-    #     rows.append(new_values)
-    # return pd.DataFrame(rows, columns=lattice_df.columns)
-
-
-def save_lattice_as_ner_format(input_lattice_file_path, output_ner_file_path):
-    df = pd.read_csv(input_lattice_file_path)
-    gb = df.groupby('sent_id')
-    for sid, group in gb:
-        group[['form', 'tag']].to_csv(output_ner_file_path,
-                                      mode='a', header=False, index=False, sep=' ', quoting=csv.QUOTE_NONE)
-        with open(output_ner_file_path, 'a', newline='\n') as f:
-            f.write('\n')
-
-
 def spmrl_ner_conllu(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     logging.info('SPMRL NER conllu')
     partition = {'train': None, 'dev': None, 'test': None}
@@ -99,8 +58,6 @@ def spmrl_ner_conllu(data_root_path, tb_name, tb_root_path=None, ma_name=None):
         data_tb_path.mkdir(parents=True, exist_ok=True)
         logging.info(f'Loading treebank: {tb_root_path}')
         partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
-        # for part in partition:
-        #     partition[part] = _fix_spmrl_lattice_multivalue_feats(partition[part])
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
             logging.info(f'Saving: {lattice_file_path}')
@@ -146,6 +103,7 @@ def spmrl(data_root_path, tb_name, tb_root_path=None, ma_name=None):
         logging.info(f'Loading treebank: {tb_root_path}')
         partition = conllx.load_conllx(tb_root_path, partition, tb_name, ma_name)
         for part in partition:
+            logging.info(f'Unify {part} multivalued SPMRL features')
             partition[part] = _fix_spmrl_lattice_multivalue_feats(partition[part])
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'

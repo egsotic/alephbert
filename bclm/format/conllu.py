@@ -1,7 +1,7 @@
 from copy import copy
 import pandas as pd
 import unicodedata
-from .utils import split_sentences, lattice_fields
+from .format_utils import split_sentences, lattice_fields
 
 
 CONLLU_COLUMN_NAMES = ['ID', 'FORM', 'LEMMA', 'UPOS', 'XPOS', 'FEATS', 'HEAD', 'DEPREL', 'DEPS', 'MISC']
