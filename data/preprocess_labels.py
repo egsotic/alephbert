@@ -94,9 +94,10 @@ def load_label_vocab(data_path: Path, partition: iter, pad, sos=None, eos=None) 
                 if f != '_':
                     [feat_name, feat_value] = f.split('=')
                     feats[feat_name].add(feat_value)
-    tags.add('_')
+    # tags.add('_')
     for f in feats:
-        feats[f].add('_')
+        if f != 'biose_layer0':
+            feats[f].add('_')
     special_labels = [pad]
     if sos is not None:
         special_labels += [sos]
@@ -113,11 +114,11 @@ def load_label_vocab(data_path: Path, partition: iter, pad, sos=None, eos=None) 
 
 def save_labeled_data_samples(data_path: Path, morph_partition: dict, labels2id: dict, pad, eos=None):
     for part in morph_partition:
-        tag_samples_file = data_path / f'{part}_label_data_samples.csv'
+        label_samples_file = data_path / f'{part}_label_data_samples.csv'
         logging.info(f'preprocessing {part} labeled data samples')
         samples_df = _collate_labels(morph_partition[part], labels2id, pad=pad, eos=eos)
-        logging.info(f'saving {tag_samples_file}')
-        samples_df.to_csv(str(tag_samples_file))
+        logging.info(f'saving {label_samples_file}')
+        samples_df.to_csv(str(label_samples_file))
 
 
 def _load_labeled_data_samples(data_path: Path, partition: list) -> dict:
@@ -147,9 +148,9 @@ def load_labeled_data(data_path: Path, partition: list, label_names: list) -> di
 
 def get_label_names(data_path: Path, partition: list):
     data_samples = _load_labeled_data_samples(data_path, partition)
-    non_label_column_names = ['sent_idx', 'token_idx', 'morph_idx', 'token', 'form']
+    non_label_column_names = ['sent_idx', 'token_idx', 'morph_idx', 'token', 'form', 'tag']
     label_names = set()
     for part in partition:
         label_names |= set([name for name in data_samples[part].columns
                             if name not in non_label_column_names and name[-3:] != '_id'])
-    return list(sorted(label_names))
+    return ['tag'] + list(sorted(label_names))

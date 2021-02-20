@@ -42,6 +42,7 @@ def to_token_morph_labels(labels, label_names, id2labels: dict, pads: list) -> l
         for token_feat_labels in feat_labels:
             token_feat_labels = token_feat_labels[token_feat_labels != pads[i]]
             token_feat_labels = [id2labels[feat_name][t.item()] for t in token_feat_labels]
+            # token_feat_labels = [f for f in token_feat_labels if f != '_']
             morph_labels.append(token_feat_labels)
         tokens.append(morph_labels)
     return list(map(list, zip(*tokens)))
@@ -53,7 +54,7 @@ def _to_feats_strs(labels: dict) -> list:
     feature_values = [labels[feat_name] for feat_name in feature_names]
     feature_values = [f for f in zip_longest(*feature_values)]
     for fvalues in feature_values:
-        fstrs = [f'{feature_names[j]}={fvalues[j]}' for j in range(len(feature_names)) if fvalues[j]]
+        fstrs = [f'{feature_names[j]}={fvalues[j]}' for j in range(len(feature_names)) if fvalues[j] != '_']
         feats_str = '|'.join(fstrs) if len(fstrs) > 0 else '_'
         feats_strs.append(feats_str)
     return feats_strs
@@ -64,7 +65,8 @@ def _to_sent_token_lattice_rows(sent_id, tokens, token_segments, token_labels, l
     node_id = 0
     for token_id, (token, forms, labels) in enumerate(zip_longest(tokens, token_segments, token_labels, fillvalue=[])):
         labels = {label_names[j]: labels[j] for j in range(len(label_names))}
-        tags = labels['tag'] if 'tag' in labels else ['_' for _ in range(len(forms))]
+        # tags = labels['tag'] if 'tag' in labels else ['_' for _ in range(len(forms))]
+        tags = labels['tag'] if 'tag' in labels else []
         feats_strs = _to_feats_strs({k: v for k, v in labels.items() if k != 'tag'})
         for form, tag, feat in zip_longest(forms, tags, feats_strs, fillvalue='_'):
             row = [sent_id, node_id, node_id+1, form, '_', tag, feat, token_id+1, token, True]
@@ -120,6 +122,9 @@ def save_ner(df, out_file_path, ner_feat_name):
     with open(out_file_path, 'w') as f:
         for sid, group in gb:
             for row in group[['form', 'feats']].itertuples():
-                feats = {feat.split('=')[0]: feat.split('=')[1] for feat in row.feats.split('|')}
+                if row.feats == '_':
+                    feats = {ner_feat_name: 'O'}
+                else:
+                    feats = {feat.split('=')[0]: feat.split('=')[1] for feat in row.feats.split('|')}
                 f.write(f"{row.form} {feats[ner_feat_name]}\n")
             f.write('\n')

@@ -22,13 +22,13 @@ logging.basicConfig(
 )
 
 # Config
-tb_schema = "UD"
-# tb_schema = "SPMRL"
-tb_data_src = "UD_Hebrew"
+# tb_schema = "UD"
+tb_schema = "SPMRL"
+# tb_data_src = "UD_Hebrew"
 # tb_data_src = "for_amit_spmrl"
-# tb_data_src = "HebrewTreebank"
-tb_name = "HTB"
-# tb_name = "hebtb"
+tb_data_src = "HebrewTreebank"
+# tb_name = "HTB"
+tb_name = "hebtb"
 
 bert_tokenizer_type = 'wordpiece'
 # bert_tokenizer_type = 'roots'
@@ -75,11 +75,12 @@ def load_preprocessed_data_samples(data_root_path, partition, label_names) -> di
 
 
 datasets = {}
-label_names = ['tag']
+# label_names = ['tag']
+# label_names = ['biose_layer0']
 # label_names = ['tag', 'biose_layer0']
 # label_names = ['tag', 'Gender', 'Number', 'Person', 'Tense']
 # label_names = []
-# label_names = None
+label_names = None
 if label_names is None:
     label_names = preprocess_labels.get_label_names(preprocessed_data_root_path, partition)
 
@@ -92,7 +93,10 @@ elif len(label_names) == 1:
 elif len(label_names) == 2:
     out_morph_type = f'{out_morph_type}_{label_names[0]}_{label_names[1]}'
 else:
-    out_morph_type = f'{out_morph_type}_{label_names[0]}_feats'
+    if 'tag' in label_names:
+        out_morph_type = f'{out_morph_type}_tag_feats'
+    else:
+        out_morph_type = f'{out_morph_type}_feats'
 out_base = Path(f'experiments/{out_morph_type}/bert')
 out_path = out_base / bert_model_type / bert_tokenizer_type / bert_version / tb_data_src / tb_name
 out_path.mkdir(parents=True, exist_ok=True)
@@ -406,7 +410,7 @@ for i in trange(epochs, desc="Epoch"):
                                                       ignore_cat=True))
 
             train_utils.save_ner(test_samples, out_path / 'morph_label_test.bmes', 'biose_layer0')
-            test_gold_file_path = f'data/raw/{tb_data_src}/{tb_name}/morph_gold_test.bmes'
+            test_gold_file_path = f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_test.bmes'
             print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, out_path / 'morph_label_test.bmes'))
             print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, out_path / 'morph_label_test.bmes',
                                                       ignore_cat=True))
