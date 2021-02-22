@@ -19,15 +19,20 @@ def get_config(vocab_size, num_hidden_layers=6):
     )
 
 
-def get_tokenizer(vocab_size):
-    pretrained_tokenizer_path = Path('experiments/tokenizers') / f'{tokenizer_type}-{vocab_size}'
-    logger.info(f'loading tokenizer from {pretrained_tokenizer_path}')
+def get_tokenizer():
+    pretrained_tokenizer_path = Path(f'./experiments/tokenizers/{tokenizer_type}/{tokenizer_type}-{data_source_name}-{vocab_size}')
+    logger.info(f'loading tokenizer {pretrained_tokenizer_path}')
     return BertTokenizerFast.from_pretrained(str(pretrained_tokenizer_path), max_len=512)
 
 
-def get_model(vocab_size):
-    config = get_config(vocab_size)
-    return BertForMaskedLM(config=config)
+def get_model(model_path=None):
+    if model_path is None:
+        config = get_config()
+        return BertForMaskedLM(config=config)
+    logging.info('Loading pre-trained AlephBERT')
+    bert = BertForMaskedLM.from_pretrained(str(model_path))
+    bert_tokenizer = BertTokenizerFast.from_pretrained(str(model_path))
+    return bert, bert_tokenizer
 
 
 # def get_train_data1(tokenizer):
@@ -41,9 +46,10 @@ def get_model(vocab_size):
 
 
 def get_train_data(max_length):
-    p = Path('data/raw/oscar/he_dedup-1000.txt')
-    logger.info(f'loading training data from: {p}')
-    ds = load_dataset('text', data_files=[str(p)])
+    # paths = [str(x) for x in Path("./data/raw").glob("**/*.txt")]
+    paths = ['data/raw/oscar/he_dedup.txt']
+    logger.info(f'loading training data from: {paths}')
+    ds = load_dataset('text', data_files=[paths])
 
     def tokenize_function(examples):
         examples["text"] = [line for line in examples["text"] if len(line) > 0 and not line.isspace()]
@@ -59,26 +65,26 @@ def get_train_data(max_length):
     ).filter(lambda e: e['length'] <= max_length)
 
 
-def get_data_collator(tokenizer):
+def get_data_collator():
     return DataCollatorForLanguageModeling(tokenizer=tokenizer)
 
 
-def get_train_args(epochs=1, lr=1e-4):
-    p = Path('experiments/transformers') / f'bert-{tokenizer_type}-{vocab_size}'
-    # p.mkdir(parents=True, exist_ok=True)
+def get_train_args(lr=1e-4):
+    p = Path(f'experiments/transformers/bert/distilled/{tokenizer_type}') / f'bert-distilled-{tokenizer_type}-{data_source_name}-{vocab_size}-128'
+    p.mkdir(parents=True, exist_ok=True)
     return TrainingArguments(
         output_dir=str(p),
         overwrite_output_dir=True,
-        # num_train_epochs=epochs,
-        # per_device_train_batch_size=32,
-        # save_steps=10000,
-        # save_total_limit=2,
-        # learning_rate=lr,
-        # do_train=True,
-        # do_eval=True,
-        # evaluation_strategy='steps',
-        # fp16=True,
-        # logging_steps=10000
+        num_train_epochs=5,
+        per_device_train_batch_size=48,
+        gradient_accumulation_steps=5,
+        # eval_accumulation_steps=1,
+        save_total_limit=2,
+        learning_rate=lr,
+        fp16=True,
+        # logging_steps=10000,
+        prediction_loss_only=True,
+        # dataloader_num_workers=32,
     )
 
 
@@ -90,12 +96,13 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+data_source_name = 'oscar'
 tokenizer_type = 'wordpiece'
 vocab_size = 52000
 training_args = get_train_args()
-tokenizer = get_tokenizer(vocab_size)
-model = get_model(vocab_size)
-data_collator = get_data_collator(tokenizer)
+tokenizer = get_tokenizer()
+model = get_model()
+data_collator = get_data_collator()
 train_dataset = get_train_data(128)
 
 trainer = Trainer(

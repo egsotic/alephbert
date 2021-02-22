@@ -349,20 +349,13 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
     for j in range(len(label_names)):
         print(f'epoch {epoch} {phase}, total {label_names[j]} loss: {total_label_losses[j] / len(data)}')
 
-    # aligned_scores, mset_scores = morph_eval(total_decoded_forms, total_target_forms)
-    # # print(f'epoch {epoch} {phase}, total form total aligned scores: {aligned_scores}')
-    # print(f'epoch {epoch} {phase}, total form total mset scores: {mset_scores}')
-
-    # total_decoded_labels = list(map(list, zip(*total_decoded_labels)))
-    # total_target_labels = list(map(list, zip(*total_target_labels)))
-
-    # for j in range(len(label_names)):
-    #     if label_names[j][:3].lower() in ['tag', 'bio', 'gen', 'num', 'per', 'ten']:
-    #         decoded_values = [labels[j] for sent_labels in total_decoded_labels for labels in sent_labels]
-    #         target_values = [labels[j] for sent_labels in total_target_labels for labels in sent_labels]
-    #         aligned_scores, mset_scores = morph_eval(decoded_values, target_values)
-    #         # print(f'epoch {epoch} {phase}, total {label_names[j]} aligned scores: {aligned_scores}')
-    #         print(f'epoch {epoch} {phase}, total {label_names[j]} mset scores: {mset_scores}')
+    for j in range(len(label_names)):
+        if label_names[j][:3].lower() in ['tag', 'bio', 'gen', 'num', 'per', 'ten']:
+            decoded_values = [labels[j] for sent_labels in total_decoded_labels for labels in sent_labels]
+            target_values = [labels[j] for sent_labels in total_target_labels for labels in sent_labels]
+            aligned_scores, mset_scores = train_utils.morph_eval(decoded_values, target_values)
+            # print(f'epoch {epoch} {phase}, total {label_names[j]} aligned scores: {aligned_scores}')
+            print(f'epoch {epoch} {phase}, total {label_names[j]} mset scores: {mset_scores}')
 
     return train_utils.get_lattice_data(total_decoded_lattice_rows, label_names)
 
@@ -390,7 +383,7 @@ teacher_forcing_ratio = 1.0
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
     md_model.train()
-    process(md_model, train_dataloader, loss_fct, epoch, 'train', 10, teacher_forcing_ratio, adam, max_grad_norm)
+    process(md_model, train_dataloader, loss_fct, epoch, 'train', 100, teacher_forcing_ratio, adam, max_grad_norm)
     md_model.eval()
     with torch.no_grad():
         dev_samples = process(md_model, dev_dataloader, loss_fct, epoch, 'dev', 1)
@@ -399,18 +392,18 @@ for i in trange(epochs, desc="Epoch"):
                                       fields=eval_fields)
         test_samples = process(md_model, test_dataloader, loss_fct, epoch, 'test', 1)
         test_samples.to_csv(out_path / 'test_samples.csv')
-        train_utils.print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='dev', step=epoch,
+        train_utils.print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='test', step=epoch,
                                       fields=eval_fields)
 
         if 'biose_layer0' in label_names:
             train_utils.save_ner(dev_samples, out_path / 'morph_label_dev.bmes', 'biose_layer0')
-            dev_gold_file_path = f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_dev.bmes'
-            print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, out_path / 'morph_label_dev.bmes'))
-            print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, out_path / 'morph_label_dev.bmes',
-                                                      ignore_cat=True))
+            dev_gold_file_path = Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_dev.bmes')
+            dev_pred_file_path = out_path / 'morph_label_dev.bmes'
+            print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path))
+            print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path, ignore_cat=True))
 
             train_utils.save_ner(test_samples, out_path / 'morph_label_test.bmes', 'biose_layer0')
-            test_gold_file_path = f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_test.bmes'
-            print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, out_path / 'morph_label_test.bmes'))
-            print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, out_path / 'morph_label_test.bmes',
-                                                      ignore_cat=True))
+            test_gold_file_path = Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_test.bmes')
+            test_pred_file_path = out_path / 'morph_label_test.bmes'
+            print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path))
+            print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path, ignore_cat=True))
