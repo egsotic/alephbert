@@ -9,7 +9,7 @@ from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
 from transformers.models.bert.modeling_bert import BertForMaskedLM
 
 
-def get_config(vocab_size, num_hidden_layers=6):
+def get_config():
     return BertConfig(
         vocab_size=vocab_size,
         max_position_embeddings=512,
@@ -45,24 +45,24 @@ def get_model(model_path=None):
 #     )
 
 
-def get_train_data(max_length):
-    # paths = [str(x) for x in Path("./data/raw").glob("**/*.txt")]
+def get_train_data(max_length, min_length=0):
     paths = ['data/raw/oscar/he_dedup.txt']
     logger.info(f'loading training data from: {paths}')
-    ds = load_dataset('text', data_files=[paths])
+    # ds = load_dataset('text', data_files=[str(p)], cache_dir='/localdata/amitse/.cache')
+    ds = load_dataset('text', data_files=paths)
 
     def tokenize_function(examples):
         examples["text"] = [line for line in examples["text"] if len(line) > 0 and not line.isspace()]
-        batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=False,
-                                   return_length=True, return_token_type_ids=False, return_attention_mask=False)
+#         batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=True, truncation=True, max_length=128)
+        batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=False, return_length=True, return_token_type_ids=False, return_attention_mask=False)
+#         batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=False, return_length=True, return_token_type_ids=False, return_attention_mask=False, truncation=True)
+        # examples['input_ids'] = [{"input_ids": torch.tensor(e, dtype=torch.long)} for e in batch_encoding["input_ids"]]
         return batch_encoding
-
     return ds.map(
         tokenize_function,
         batched=True,
-        # remove_columns=["text"],
-        # num_proc=2,
-    ).filter(lambda e: e['length'] <= max_length)
+        num_proc=48,
+    ).filter(lambda e: e['length'] > min_length and e['length'] < max_length)
 
 
 def get_data_collator():
@@ -81,10 +81,10 @@ def get_train_args(lr=1e-4):
         # eval_accumulation_steps=1,
         save_total_limit=2,
         learning_rate=lr,
-        fp16=True,
+        # fp16=True,
         # logging_steps=10000,
         prediction_loss_only=True,
-        # dataloader_num_workers=32,
+        dataloader_num_workers=32,
     )
 
 
@@ -99,11 +99,22 @@ logging.basicConfig(
 data_source_name = 'oscar'
 tokenizer_type = 'wordpiece'
 vocab_size = 52000
+num_hidden_layers = 6
 training_args = get_train_args()
 tokenizer = get_tokenizer()
 model = get_model()
 data_collator = get_data_collator()
-train_dataset = get_train_data(128)
+train_dataset = get_train_data(64)
+
+import pandas as pd
+import numpy as np
+df = train_dataset['train'].data[1].to_pandas()
+# len_df = pd.DataFrame(train_dataset.data['train'][1], dtype=int)
+print(df.head())
+print(len(df))
+print(df['len'].mean(axis=0))
+print(df['len'].std(axis=0))
+
 
 trainer = Trainer(
     model=model,
