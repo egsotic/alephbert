@@ -7,8 +7,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import BertModel, BertTokenizerFast
+from conditional_random_field import allowed_transitions
 from data import preprocess_form, preprocess_labels
-from model_md import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
+from model_md_crf import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
 from bclm import treebank as tb, ne_evaluate_mentions
 from hebrew_root_tokenizer import AlefBERTRootTokenizer
 import train_utils
@@ -25,8 +26,8 @@ logging.basicConfig(
 # tb_schema = "UD"
 tb_schema = "SPMRL"
 # tb_data_src = "UD_Hebrew"
-# tb_data_src = "for_amit_spmrl"
-tb_data_src = "HebrewTreebank"
+tb_data_src = "for_amit_spmrl"
+# tb_data_src = "HebrewTreebank"
 # tb_name = "HTB"
 tb_name = "hebtb"
 
@@ -36,9 +37,11 @@ bert_vocab_size = 52000
 # bert_vocab_size = 10000
 bert_corpus_name = 'oscar'
 bert_model_type = 'distilled'
-# bert_version = 'heBERT'
-# bert_version = 'mBERT'
-bert_version = f'bert-{bert_model_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
+bert_model_name = 'bert'
+# bert_model_name = 'heBERT'
+# bert_model_name = 'mBERT'
+bert_version = f'{bert_model_name}-{bert_model_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
+tokenizer_version = f'{bert_model_name}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
 
 md_strategry = "morph-pipeline"
 # md_strategry = "morph-sequence"
@@ -55,7 +58,7 @@ elif tb_name == 'hebtb':
         partition = tb.spmrl(raw_root_path, tb_name)
 else:
     partition = {'train': None, 'dev': None, 'test': None}
-preprocessed_data_root_path = Path(f'data/preprocessed/{tb_data_src}/{tb_name}/{bert_version}')
+preprocessed_data_root_path = Path(f'data/preprocessed/{tb_data_src}/{tb_name}/{tokenizer_version}')
 
 
 def load_preprocessed_data_samples(data_root_path, partition, label_names) -> dict:
@@ -76,11 +79,11 @@ def load_preprocessed_data_samples(data_root_path, partition, label_names) -> di
 
 datasets = {}
 # label_names = ['tag']
-# label_names = ['biose_layer0']
+label_names = ['biose_layer0']
 # label_names = ['tag', 'biose_layer0']
 # label_names = ['tag', 'Gender', 'Number', 'Person', 'Tense']
 # label_names = []
-label_names = None
+# label_names = None
 if label_names is None:
     label_names = preprocess_labels.get_label_names(preprocessed_data_root_path, partition)
 
@@ -97,8 +100,9 @@ else:
         out_morph_type = f'{out_morph_type}_tag_feats'
     else:
         out_morph_type = f'{out_morph_type}_feats'
-out_base = Path(f'experiments/{out_morph_type}/bert')
-out_path = out_base / bert_model_type / bert_tokenizer_type / bert_version / tb_data_src / tb_name
+out_base = Path(f'experiments/{out_morph_type}/{bert_model_name}')
+# out_path = out_base / bert_model_type / bert_tokenizer_type / bert_version / tb_data_src / tb_name
+out_path = out_base / bert_model_type / bert_version / tb_data_src / tb_name
 out_path.mkdir(parents=True, exist_ok=True)
 
 data_samples_file_paths = {part: preprocessed_data_root_path / f'{part}_{out_morph_type}_data_samples.pt'
@@ -114,70 +118,81 @@ else:
         file_path = data_samples_file_paths[part]
         logging.info(f'Saving {tb_schema} {out_morph_type} tensor dataset to {file_path}')
         torch.save(datasets[part], file_path)
-datasets['train'] = TensorDataset(*[t[:100] for t in datasets['train'].tensors])
-datasets['dev'] = TensorDataset(*[t[:100] for t in datasets['dev'].tensors])
-datasets['test'] = TensorDataset(*[t[:100] for t in datasets['test'].tensors])
+# datasets['train'] = TensorDataset(*[t[:100] for t in datasets['train'].tensors])
+# datasets['dev'] = TensorDataset(*[t[:100] for t in datasets['dev'].tensors])
+# datasets['test'] = TensorDataset(*[t[:100] for t in datasets['test'].tensors])
 train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=False)
 dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
 test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
 # Language Model
-bert_folder_path = Path(f'./experiments/transformers/bert/{bert_model_type}/{bert_tokenizer_type}/{bert_version}')
+bert_folder_path = Path(f'./experiments/transformers/{bert_model_name}/{bert_model_type}/{bert_tokenizer_type}/{bert_version}')
 if bert_tokenizer_type == 'roots':
     logging.info(f'Loading roots tokenizer BERT from: {str(bert_folder_path)}')
     bert_tokenizer = AlefBERTRootTokenizer(str(bert_folder_path / 'vocab.txt'))
     bert = BertModel.from_pretrained(str(bert_folder_path))
-elif bert_version == 'mBERT':
-    logging.info(f'Loading {bert_version}')
+elif bert_model_name == 'mBERT':
+    logging.info(f'Loading {bert_model_name}')
     bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual')
     bert = BertModel.from_pretrained('bert-base-multilingual')
-elif bert_version == 'heBERT':
-    logging.info(f'Loading {bert_version}')
-    bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_version}')
-    bert = BertModel.from_pretrained(f'avichr/{bert_version}')
+elif bert_model_name == 'heBERT':
+    logging.info(f'Loading {bert_model_name}')
+    bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_model_name}')
+    bert = BertModel.from_pretrained(f'avichr/{bert_model_name}')
 else:
     logging.info(f'Loading BERT from: {str(bert_folder_path)}')
     bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
     bert = BertModel.from_pretrained(str(bert_folder_path))
 logging.info('BERT model and tokenizer loaded')
 
-# MD Model
+
+# Vocabs
 pad, sos, eos, sep = '<pad>', '<s>', '</s>', '<sep>'
 char_vectors, char_vocab = preprocess_labels.load_char_vocab(preprocessed_data_root_path)
 label_vocab = preprocess_labels.load_label_vocab(preprocessed_data_root_path, partition, pad=pad)
-char_tensors = torch.tensor(char_vectors, dtype=torch.float)
-char_emb_pad_id = char_vocab['char2id'][pad]
-char_emb = nn.Embedding.from_pretrained(char_tensors, freeze=False, padding_idx=char_emb_pad_id)
-num_labels = [len(label_vocab['labels2id'][l]) for l in label_names]
-num_layers = 2
-hidden_size = bert.config.hidden_size // num_layers
-dropout = 0.1
-num_chars = len(char_vocab['char2id'])
-out_dropout = 0.5
-
-xtoken_emb = BertTokenEmbeddingModel(bert, bert_tokenizer)
-if md_strategry == "morph-pipeline":
-    segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars, [])
-    md_model = MorphPipelineModel(xtoken_emb, segmentor, hidden_size, num_layers, dropout, out_dropout, num_labels)
-elif md_strategry == "morph-sequence":
-    segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars, num_labels)
-    md_model = MorphSequenceModel(xtoken_emb, segmentor)
-else:
-    segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars, [])
-    md_model = MorphSequenceModel(xtoken_emb, segmentor)
-device = None
-if device is not None:
-    md_model.to(device)
-print(md_model)
 
 # Special symbols
 char_sos = torch.tensor([char_vocab['char2id'][sos]], dtype=torch.long)
 char_eos = torch.tensor([char_vocab['char2id'][eos]], dtype=torch.long)
 char_sep = torch.tensor([char_vocab['char2id'][sep]], dtype=torch.long)
 char_pad = torch.tensor([char_vocab['char2id'][pad]], dtype=torch.long)
+label_pads = [torch.tensor([label_vocab['labels2id'][l][pad]], dtype=torch.long) for l in label_names]
+
+# MD Model
+char_tensors = torch.tensor(char_vectors, dtype=torch.float)
+char_emb_pad_id = char_vocab['char2id'][pad]
+char_emb = nn.Embedding.from_pretrained(char_tensors, freeze=False, padding_idx=char_emb_pad_id)
+# num_labels = {len(label_vocab['labels2id'][name]) for name in label_names}
+num_layers = 2
+hidden_size = bert.config.hidden_size // num_layers
+dropout = 0.1
+num_chars = len(char_vocab['char2id'])
+out_dropout = 0.5
+xtoken_emb = BertTokenEmbeddingModel(bert, bert_tokenizer)
+label_classifier_configs = []
+for name in label_names:
+    config = {'id2label': label_vocab['id2labels'][name]}
+    if name == 'biose_layer0':
+        config['crf_trans_type'] = 'BIOSE'
+    label_classifier_configs.append(config)
+
+if md_strategry == "morph-pipeline":
+    segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
+    md_model = MorphPipelineModel(xtoken_emb, segmentor, hidden_size, num_layers, dropout, out_dropout,
+                                  label_classifier_configs)
+elif md_strategry == "morph-sequence":
+    segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars,
+                               label_classifier_configs)
+    md_model = MorphSequenceModel(xtoken_emb, segmentor)
+else:
+    segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
+    md_model = MorphSequenceModel(xtoken_emb, segmentor)
+device = None
 char_special_symbols = {sos: char_sos.to(device), eos: char_eos.to(device),
                         sep: char_sep.to(device), pad: char_pad.to(device)}
-label_pads = [torch.tensor([label_vocab['labels2id'][l][pad]], dtype=torch.long) for l in label_names]
+if device is not None:
+    md_model.to(device)
+print(md_model)
 
 
 # Training and evaluation routine
@@ -223,22 +238,16 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
 
         # Form Loss
         batch_form_targets = nn.utils.rnn.pad_sequence(batch_form_targets, batch_first=True)
-        loss_batch_form_targets = batch_form_targets.view(-1)
-        loss_batch_form_scores = batch_form_scores.view(-1, batch_form_scores.shape[-1])
-        form_loss = criterion(loss_batch_form_scores, loss_batch_form_targets)
+        form_loss = model.form_loss(batch_form_scores, batch_form_targets, criterion)
         print_form_loss += form_loss.item()
 
         # Label Losses
-        label_losses = []
         batch_label_targets = [[t[:, :, j] for j in range(t.shape[-1])] for t in batch_label_targets]
         batch_label_targets = [nn.utils.rnn.pad_sequence(label_targets, batch_first=True)
                                for label_targets in list(map(list, zip(*batch_label_targets)))]
-        for j, (label_scores, label_targets) in enumerate(zip(batch_label_scores, batch_label_targets)):
-            loss_label_targets = label_targets.view(-1)
-            loss_label_scores = label_scores.view(-1, label_scores.shape[-1])
-            label_loss = criterion(loss_label_scores, loss_label_targets)
-            label_losses.append(label_loss)
-            print_label_losses[j] += label_loss.item()
+        label_losses = model.labels_losses(batch_label_scores, batch_label_targets, criterion)
+        for j in range(len(label_losses)):
+            print_label_losses[j] += label_losses[j].item()
 
         # Optimization Step
         if optimizer is not None:
@@ -383,7 +392,7 @@ teacher_forcing_ratio = 1.0
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
     md_model.train()
-    process(md_model, train_dataloader, loss_fct, epoch, 'train', 100, teacher_forcing_ratio, adam, max_grad_norm)
+    process(md_model, train_dataloader, loss_fct, epoch, 'train', 10, teacher_forcing_ratio, adam, max_grad_norm)
     md_model.eval()
     with torch.no_grad():
         dev_samples = process(md_model, dev_dataloader, loss_fct, epoch, 'dev', 1)

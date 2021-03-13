@@ -2,6 +2,33 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import BertModel, BertTokenizer
+from conditional_random_field import ConditionalRandomField, allowed_transitions
+
+
+def compute_loss(scores, targets, criterion: nn.CrossEntropyLoss):
+    loss_target = targets.view(-1)
+    loss_input = scores.view(-1, scores.shape[-1])
+    return criterion(loss_input, loss_target)
+
+
+# Mask starting from the position of the first mask_value occurrence
+# Done on the last dimension [batch, token, morph_labels]
+# E.g. [[[28, 0, 0, 0, 0], [5, 7, 0, 0, 0], [6, 0, 0, 0, 0], [13, 13, 0, 0, 0], [8, 0, 0, 0, 0]]]
+# The reason for masking from the first occurrence onward (as opposed to just using torch.ne(labels, mask_value)
+# is that the mask_value might be predicted more than once (e.g. if the mask_value is the </s> (3) value):
+# [[[12, 3, 3, 5, 0], [3, 1, 2, 5, 5], [5, 5, 3, 0, 0]]]
+def first_occurence_mask(labels: torch.Tensor, mask_value) -> torch.BoolTensor:
+    masks = torch.eq(labels, mask_value)
+    return ~torch.cumsum(masks, dim=-1).bool()
+
+
+def crf_prepare(scores, labels) -> (torch.Tensor, torch.Tensor, torch.Tensor):
+    masks = torch.ne(labels, 0)
+    masked_scores = [scores[mask] for scores, mask in zip(scores, masks)]
+    masked_labels = [label[mask] for label, mask in zip(labels, masks)]
+    logits = nn.utils.rnn.pad_sequence(masked_scores, batch_first=True)
+    tags = nn.utils.rnn.pad_sequence(masked_labels, batch_first=True)
+    return logits, tags, masks
 
 
 class BertTokenEmbeddingModel(nn.Module):
@@ -30,11 +57,60 @@ class BertTokenEmbeddingModel(nn.Module):
         return emb_tokens
 
 
+class LabelClassifier(nn.Module):
+
+    def __init__(self, char_emb_size, config: dict):
+        super(LabelClassifier, self).__init__()
+        self.config = config
+        self.num_labels = len(config['id2label'])
+        self.ff = nn.Linear(in_features=char_emb_size, out_features=self.num_labels)
+        self.crf = None
+        if 'crf_trans_type' in config:
+            constraint_type = config['crf_trans_type']
+            labels = config['id2label']
+            transitions = allowed_transitions(constraint_type=constraint_type, labels=labels)
+            self.crf = ConditionalRandomField(num_tags=self.num_labels, constraints=transitions)
+
+    def forward(self, dec_chars):
+        return self.ff(dec_chars)
+
+    def loss(self, scores, targets, criterion: nn.CrossEntropyLoss):
+        if self.crf is None:
+            loss_value = compute_loss(scores, targets, criterion)
+        else:
+            crf_scores, crf_tags, _ = crf_prepare(scores, targets)
+            crf_masks = torch.ne(crf_tags, 0).bool()
+            crf_log_likelihood = self.crf(inputs=crf_scores, tags=crf_tags, mask=crf_masks)
+            crf_log_likelihood /= torch.sum(crf_masks)
+            loss_value = -crf_log_likelihood
+        return loss_value
+
+    def decode(self, scores) -> torch.Tensor:
+        decoded_labels = torch.argmax(scores, dim=-1)
+        if self.crf is not None:
+            crf_scores, crf_tags, token_masks = crf_prepare(scores, decoded_labels)
+            crf_masks = torch.ne(crf_tags, 0).bool()
+            crf_decoded_labels = self.crf.viterbi_tags(logits=crf_scores, mask=crf_masks)
+            for labels, crf_labels, token_mask in zip(decoded_labels, crf_decoded_labels, token_masks):
+                idxs_vals = [torch.unique_consecutive(mask, return_counts=True) for mask in token_mask]
+                idxs = torch.cat([idx for idx, _ in idxs_vals])
+                vals = torch.cat([val for _, val in idxs_vals])
+                decoded_token_tags = torch.split_with_sizes(torch.tensor(crf_labels[0]), tuple(vals[idxs]))
+                # TODO: this doesn't do the right thing if a token is decoded as all pads (0)
+                # In such a case the first mask is all False and the above split doesn't indicate that this token
+                # should be skipped
+                for idx, token_tags in enumerate(decoded_token_tags):
+                    labels[idx, :len(token_tags)] = token_tags
+        return decoded_labels
+
+
 class SegmentDecoder(nn.Module):
 
     def __init__(self, char_emb: nn.Embedding, hidden_size, num_layers, dropout, char_dropout, char_out_size,
-                 num_labels: list):
+                 labels_configs: list = None):
         super(SegmentDecoder, self).__init__()
+        if labels_configs is None:
+            labels_configs = []
         self.char_emb = char_emb
         self.char_encoder = nn.GRU(input_size=char_emb.embedding_dim,
                                    hidden_size=hidden_size,
@@ -50,7 +126,7 @@ class SegmentDecoder(nn.Module):
                                    dropout=dropout)
         self.char_dropout = nn.Dropout(char_dropout)
         self.char_out = nn.Linear(in_features=self.char_decoder.hidden_size, out_features=char_out_size)
-        self.classifiers = nn.ModuleList([nn.Linear(in_features=self.char_out.out_features, out_features=num) for num in num_labels])
+        self.classifiers = nn.ModuleList([LabelClassifier(char_out_size, config) for config in labels_configs])
 
     @property
     def enc_num_layers(self):
@@ -94,6 +170,13 @@ class SegmentDecoder(nn.Module):
             label_scores_out.append(F.pad(scores, (0, 0, 0, label_fill_len)))
         return char_scores_out, char_states_out, label_scores_out
 
+    def form_loss(self, form_scores, form_targets, criterion: nn.CrossEntropyLoss):
+        return compute_loss(form_scores, form_targets, criterion)
+
+    def labels_losses(self, labels_scores, labels_targets, criterion: nn.CrossEntropyLoss):
+        return [classifier.loss(scores, targets, criterion)
+                for scores, targets, classifier in zip(labels_scores, labels_targets, self.classifiers)]
+
     def _forward_encode(self, char_seq, enc_state):
         mask = torch.ne(char_seq, 0)
         emb_chars = self.char_emb(char_seq[mask]).unsqueeze(1)
@@ -111,7 +194,7 @@ class SegmentDecoder(nn.Module):
         if target_char_seq is not None:
             next_dec_char = target_char_seq[num_scores].unsqueeze(0)
         else:
-            next_dec_char = self.decode(dec_char_output).squeeze(0)
+            next_dec_char = self._form_decode(dec_char_output).squeeze(0)
         if torch.eq(next_dec_char, sep):
             dec_labels_output = self._labels_decode(dec_char_output)
         else:
@@ -121,8 +204,13 @@ class SegmentDecoder(nn.Module):
     def _labels_decode(self, dec_char_output) -> list:
         return [classifier(dec_char_output) for classifier in self.classifiers]
 
-    def decode(self, label_scores):
-        return torch.argmax(label_scores, dim=-1)
+    def _form_decode(self, scores):
+        return torch.argmax(scores, dim=-1)
+
+    def decode(self, form_scores, label_scores) -> (torch.Tensor, torch.Tensor):
+        dec_forms = self._form_decode(form_scores)
+        dec_labels = [classifier.decode(scores) for scores, classifier in zip(label_scores, self.classifiers)]
+        return dec_forms, dec_labels
 
 
 class MorphSequenceModel(nn.Module):
@@ -162,16 +250,22 @@ class MorphSequenceModel(nn.Module):
         return out_char_scores, out_char_states, out_label_scores
 
     def decode(self, morph_seg_scores, label_scores: list):
-        dec_forms = self.segment_decoder.decode(morph_seg_scores)
-        dec_labels = [torch.argmax(scores, dim=-1) for scores in label_scores]
-        return dec_forms, dec_labels
+        return self.segment_decoder.decode(morph_seg_scores, label_scores)
+
+    def form_loss(self, form_scores, form_targets, criterion: nn.CrossEntropyLoss):
+        return self.segment_decoder.form_loss(form_scores, form_targets, criterion)
+
+    def labels_losses(self, labels_scores, labels_targets, criterion: nn.CrossEntropyLoss):
+        return self.segment_decoder.labels_losses(labels_scores, labels_targets, criterion)
 
 
 class MorphPipelineModel(MorphSequenceModel):
 
     def __init__(self, xtoken_emb: BertTokenEmbeddingModel, segment_decoder: SegmentDecoder, hidden_size, num_layers,
-                 dropout, seg_dropout, num_labels: list):
+                 dropout, seg_dropout, labels_configs: list = None):
         super(MorphPipelineModel, self).__init__(xtoken_emb, segment_decoder)
+        if labels_configs is None:
+            labels_configs = []
         self.encoder = nn.LSTM(input_size=xtoken_emb.embedding_dim,
                                hidden_size=hidden_size,
                                num_layers=num_layers,
@@ -179,7 +273,7 @@ class MorphPipelineModel(MorphSequenceModel):
                                batch_first=False,
                                dropout=dropout)
         self.seg_dropout = nn.Dropout(seg_dropout)
-        self.classifiers = nn.ModuleList([nn.Linear(in_features=hidden_size*2, out_features=num) for num in num_labels])
+        self.classifiers = nn.ModuleList([LabelClassifier(hidden_size*2, config) for config in labels_configs])
 
     def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
                 target_chars=None):
@@ -211,3 +305,15 @@ class MorphPipelineModel(MorphSequenceModel):
             fill_len = max_num_labels - scores.shape[1]
             label_scores.append(F.pad(scores, (0, 0, 0, fill_len)))
         return morph_scores, morph_states, label_scores
+
+    def decode(self, morph_seg_scores, label_scores: list) -> (torch.Tensor, torch.Tensor):
+        dec_forms, _ = self.segment_decoder.decode(morph_seg_scores, label_scores)
+        dec_labels = [classifier.decode(scores) for scores, classifier in zip(label_scores, self.classifiers)]
+        return dec_forms, dec_labels
+
+    def form_loss(self, form_scores, form_targets, criterion: nn.CrossEntropyLoss):
+        return self.segment_decoder.form_loss(form_scores, form_targets, criterion)
+
+    def labels_losses(self, labels_scores, labels_targets, criterion: nn.CrossEntropyLoss):
+        return [classifier.loss(scores, targets, criterion)
+                for scores, targets, classifier in zip(labels_scores, labels_targets, self.classifiers)]
