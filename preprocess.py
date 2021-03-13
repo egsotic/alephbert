@@ -21,10 +21,12 @@ if __name__ == '__main__':
     vocab_size = 52000
     # vocab_size = 10000
     corpus_name = 'oscar'
-    bert_model_size = 'distilled'
-    # bert_version = 'mBERT'
-    # bert_version = 'heBERT'
-    bert_version = f'bert-{bert_model_size}-{tokenizer_type}-{corpus_name}-{vocab_size}'
+    # bert_model_size = 'distilled'
+    bert_model_name = 'bert'
+    # bert_model_name = 'mBERT'
+    # bert_model_name = 'heBERT'
+    # bert_version = f'bert-{bert_model_size}-{tokenizer_type}-{corpus_name}-{vocab_size}'
+    tokenizer_version = f'{bert_model_name}-{tokenizer_type}-{corpus_name}-{vocab_size}'
 
     dev_root_path = Path('/Users/Amit/dev')
     tb_root_path = dev_root_path / 'onlplab'
@@ -37,9 +39,9 @@ if __name__ == '__main__':
     # raw_root_path = Path('data/raw/for_amit_spmrl')
     raw_root_path = Path('data/raw/HebrewTreebank')
 
-    # preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{bert_version}')
-    # preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{bert_version}')
-    preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{bert_version}')
+    # preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{tokenizer_version}')
+    # preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{tokenizer_version}')
+    preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{tokenizer_version}')
     preprocessed_root_path.mkdir(parents=True, exist_ok=True)
 
     if not raw_root_path.exists():
@@ -51,13 +53,14 @@ if __name__ == '__main__':
         # raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb')
         raw_partition = tb.spmrl(raw_root_path, 'hebtb')
 
-    bert_root_path = Path(f'./experiments/transformers/bert/{bert_model_size}/{tokenizer_type}/{bert_version}')
+    bert_root_path = Path(f'./experiments/tokenizers/bert/{tokenizer_type}/{tokenizer_version}')
+    # bert_root_path = Path(f'./experiments/transformers/bert/{bert_model_size}/{tokenizer_type}/{bert_version}')
     if tokenizer_type == 'roots':
         bert_tokenizer = AlefBERTRootTokenizer(str(bert_root_path / 'vocab.txt'))
-    elif bert_version == 'mBERT':
+    elif bert_model_name == 'mBERT':
         bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-uncased')
-    elif bert_version == 'heBERT':
-        bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_version}')
+    elif bert_model_name == 'heBERT':
+        bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_model_name}')
     else:
         bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_root_path))
 

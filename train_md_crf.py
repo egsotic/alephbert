@@ -37,9 +37,11 @@ bert_vocab_size = 52000
 # bert_vocab_size = 10000
 bert_corpus_name = 'oscar'
 bert_model_type = 'distilled'
-# bert_version = 'heBERT'
-# bert_version = 'mBERT'
-bert_version = f'bert-{bert_model_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
+bert_model_name = 'bert'
+# bert_model_name = 'heBERT'
+# bert_model_name = 'mBERT'
+bert_version = f'{bert_model_name}-{bert_model_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
+tokenizer_version = f'{bert_model_name}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
 
 md_strategry = "morph-pipeline"
 # md_strategry = "morph-sequence"
@@ -56,7 +58,7 @@ elif tb_name == 'hebtb':
         partition = tb.spmrl(raw_root_path, tb_name)
 else:
     partition = {'train': None, 'dev': None, 'test': None}
-preprocessed_data_root_path = Path(f'data/preprocessed/{tb_data_src}/{tb_name}/{bert_version}')
+preprocessed_data_root_path = Path(f'data/preprocessed/{tb_data_src}/{tb_name}/{tokenizer_version}')
 
 
 def load_preprocessed_data_samples(data_root_path, partition, label_names) -> dict:
@@ -98,8 +100,9 @@ else:
         out_morph_type = f'{out_morph_type}_tag_feats'
     else:
         out_morph_type = f'{out_morph_type}_feats'
-out_base = Path(f'experiments/{out_morph_type}/bert')
-out_path = out_base / bert_model_type / bert_tokenizer_type / bert_version / tb_data_src / tb_name
+out_base = Path(f'experiments/{out_morph_type}/{bert_model_name}')
+# out_path = out_base / bert_model_type / bert_tokenizer_type / bert_version / tb_data_src / tb_name
+out_path = out_base / bert_model_type / bert_version / tb_data_src / tb_name
 out_path.mkdir(parents=True, exist_ok=True)
 
 data_samples_file_paths = {part: preprocessed_data_root_path / f'{part}_{out_morph_type}_data_samples.pt'
@@ -123,19 +126,19 @@ dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
 test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
 # Language Model
-bert_folder_path = Path(f'./experiments/transformers/bert/{bert_model_type}/{bert_tokenizer_type}/{bert_version}')
+bert_folder_path = Path(f'./experiments/transformers/{bert_model_name}/{bert_model_type}/{bert_tokenizer_type}/{bert_version}')
 if bert_tokenizer_type == 'roots':
     logging.info(f'Loading roots tokenizer BERT from: {str(bert_folder_path)}')
     bert_tokenizer = AlefBERTRootTokenizer(str(bert_folder_path / 'vocab.txt'))
     bert = BertModel.from_pretrained(str(bert_folder_path))
-elif bert_version == 'mBERT':
-    logging.info(f'Loading {bert_version}')
+elif bert_model_name == 'mBERT':
+    logging.info(f'Loading {bert_model_name}')
     bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual')
     bert = BertModel.from_pretrained('bert-base-multilingual')
-elif bert_version == 'heBERT':
-    logging.info(f'Loading {bert_version}')
-    bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_version}')
-    bert = BertModel.from_pretrained(f'avichr/{bert_version}')
+elif bert_model_name == 'heBERT':
+    logging.info(f'Loading {bert_model_name}')
+    bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_model_name}')
+    bert = BertModel.from_pretrained(f'avichr/{bert_model_name}')
 else:
     logging.info(f'Loading BERT from: {str(bert_folder_path)}')
     bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))

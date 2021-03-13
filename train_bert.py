@@ -61,7 +61,7 @@ def get_train_data(max_length, min_length=0):
     return ds.map(
         tokenize_function,
         batched=True,
-        num_proc=48,
+        num_proc=8,
     ).filter(lambda e: e['length'] > min_length and e['length'] < max_length)
 
 
@@ -70,7 +70,7 @@ def get_data_collator():
 
 
 def get_train_args(lr=1e-4):
-    p = Path(f'experiments/transformers/bert/distilled/{tokenizer_type}') / f'bert-distilled-{tokenizer_type}-{data_source_name}-{vocab_size}-128'
+    p = Path(f'experiments/transformers/bert/distilled/{tokenizer_type}') / f'bert-distilled-{tokenizer_type}-{data_source_name}-{vocab_size}'
     p.mkdir(parents=True, exist_ok=True)
     return TrainingArguments(
         output_dir=str(p),
@@ -79,12 +79,15 @@ def get_train_args(lr=1e-4):
         per_device_train_batch_size=48,
         gradient_accumulation_steps=5,
         # eval_accumulation_steps=1,
-        save_total_limit=2,
+        save_total_limit=0,
+        save_steps=0,
         learning_rate=lr,
         # fp16=True,
         # logging_steps=10000,
         prediction_loss_only=True,
-        dataloader_num_workers=32,
+        dataloader_num_workers=8,
+        # local_rank=0,
+        # sharded_ddp=True,
     )
 
 
@@ -106,14 +109,10 @@ model = get_model()
 data_collator = get_data_collator()
 train_dataset = get_train_data(64)
 
-import pandas as pd
-import numpy as np
-df = train_dataset['train'].data[1].to_pandas()
-# len_df = pd.DataFrame(train_dataset.data['train'][1], dtype=int)
-print(df.head())
-print(len(df))
-print(df['len'].mean(axis=0))
-print(df['len'].std(axis=0))
+length_series = train_dataset['train'].data[1].to_pandas()
+print(f'num samples: {len(length_series)}')
+print(f'avg sample length: {length_series.mean(axis=0)}')
+print(f'sample length stddev: {length_series.std(axis=0)}')
 
 
 trainer = Trainer(
