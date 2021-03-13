@@ -7,9 +7,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import BertModel, BertTokenizerFast
-from conditional_random_field import allowed_transitions
 from data import preprocess_form, preprocess_labels
-from model_md_crf import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
+from model_md import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
 from bclm import treebank as tb, ne_evaluate_mentions
 from hebrew_root_tokenizer import AlefBERTRootTokenizer
 import train_utils
