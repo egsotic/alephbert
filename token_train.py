@@ -47,9 +47,9 @@ else:
 tokenizer_type = 'wordpiece'
 vocab_size = 52000
 corpus_name = 'oscar'
-bert_model_size = 'distilled'
+bert_model_size_type = 'small'
 # bert_version = 'mbert'
-bert_version = f'bert-{bert_model_size}-{tokenizer_type}-{corpus_name}-{vocab_size}'
+bert_version = f'bert-{bert_model_size_type}-{tokenizer_type}-{corpus_name}-{vocab_size}'
 preprocessed_data_root_path = Path(f'data/preprocessed/{data_src}/{tb_name}/{bert_version}')
 
 
@@ -85,7 +85,7 @@ dev_dataloader = DataLoader(datasets['dev'], batch_size=1)
 test_dataloader = DataLoader(datasets['test'], batch_size=1)
 
 # Language Model
-bert_folder_path = Path(f'./experiments/transformers/bert/{bert_model_size}/{tokenizer_type}/{bert_version}')
+bert_folder_path = Path(f'./experiments/transformers/bert/{bert_model_size_type}/{tokenizer_type}/{bert_version}')
 logging.info(f'BERT folder path: {str(bert_folder_path)}')
 bert = BertModel.from_pretrained(str(bert_folder_path))
 # bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
@@ -354,8 +354,7 @@ for i in trange(epochs, desc="Epoch"):
 
 
 def test():
-    out_path = Path(f'experiments/morph-seg/bert/distilled/wordpiece/{bert_version}/UD_Hebrew/HTB')
-    # out_path = Path(f'experiments/morph-seg/bert/distilled/wordpiece/{bert_version}/HebrewTreebank/hebtb')
+    out_path = Path(f'experiments/morph-seg/bert/small/wordpiece/{bert_version}/UD_Hebrew/HTB')
     m = torch.load(out_path / 'tagger-model.pt', map_location=torch.device('cpu'))
     m.eval()
     with torch.no_grad():

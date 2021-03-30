@@ -2,7 +2,6 @@ import logging
 from pathlib import Path
 from datasets import load_dataset
 from transformers import BertConfig, TrainingArguments, set_seed
-# from transformers.data.datasets import LineByLineTextDataset
 from transformers.trainer import Trainer
 from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
@@ -35,16 +34,6 @@ def get_model(model_path=None):
     return bert, bert_tokenizer
 
 
-# def get_train_data1(tokenizer):
-#     p = Path('data/raw/oscar') / f'he_dedup-1000.txt'
-#     logger.info(f'training data: {p}')
-#     return LineByLineTextDataset(
-#         tokenizer=tokenizer,
-#         file_path=str(p),
-#         block_size=128,
-#     )
-
-
 def get_train_data(max_length, min_length=0):
     paths = ['data/raw/oscar/he_dedup.txt']
     logger.info(f'loading training data from: {paths}')
@@ -70,7 +59,7 @@ def get_data_collator():
 
 
 def get_train_args(lr=1e-4):
-    p = Path(f'experiments/transformers/bert/distilled/{tokenizer_type}') / f'bert-distilled-{tokenizer_type}-{data_source_name}-{vocab_size}'
+    p = Path(f'experiments/transformers/bert/{bert_model_size_type}/{tokenizer_type}') / f'bert-{bert_model_size_type}-{tokenizer_type}-{data_source_name}-{vocab_size}'
     p.mkdir(parents=True, exist_ok=True)
     return TrainingArguments(
         output_dir=str(p),
@@ -103,6 +92,7 @@ data_source_name = 'oscar'
 tokenizer_type = 'wordpiece'
 vocab_size = 52000
 num_hidden_layers = 6
+bert_model_size_type = 'small' if num_hidden_layers else 'basic'
 training_args = get_train_args()
 tokenizer = get_tokenizer()
 model = get_model()

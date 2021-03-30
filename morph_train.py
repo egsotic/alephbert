@@ -32,15 +32,16 @@ tb_name = "hebtb"
 
 bert_tokenizer_type = 'wordpiece'
 # bert_tokenizer_type = 'roots'
-bert_vocab_size = 52000
-# bert_vocab_size = 10000
-bert_corpus_name = 'oscar'
-bert_model_type = 'distilled'
-bert_model_name = 'bert'
-# bert_model_name = 'heBERT'
+# bert_vocab_size = 52000
+# bert_corpus_name = 'oscar'
+bert_model_size_type = 'basic'
+# bert_model_name = 'bert'
+bert_model_name = 'heBERT'
 # bert_model_name = 'mBERT'
-bert_version = f'{bert_model_name}-{bert_model_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
-tokenizer_version = f'{bert_model_name}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
+# bert_version = f'{bert_model_name}-{bert_model_size_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
+bert_version = f'{bert_model_name}'
+# tokenizer_version = f'{bert_model_name}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
+tokenizer_version = f'{bert_model_name}'
 
 md_strategry = "morph-pipeline"
 # md_strategry = "morph-sequence"
@@ -101,7 +102,7 @@ else:
         out_morph_type = f'{out_morph_type}_feats'
 out_base = Path(f'experiments/{out_morph_type}/{bert_model_name}')
 # out_path = out_base / bert_model_type / bert_tokenizer_type / bert_version / tb_data_src / tb_name
-out_path = out_base / bert_model_type / bert_version / tb_data_src / tb_name
+out_path = out_base / bert_model_size_type / bert_version / tb_data_src / tb_name
 out_path.mkdir(parents=True, exist_ok=True)
 
 data_samples_file_paths = {part: preprocessed_data_root_path / f'{part}_{out_morph_type}_data_samples.pt'
@@ -125,7 +126,7 @@ dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
 test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
 # Language Model
-bert_folder_path = Path(f'./experiments/transformers/{bert_model_name}/{bert_model_type}/{bert_tokenizer_type}/{bert_version}')
+bert_folder_path = Path(f'./experiments/transformers/{bert_model_name}/{bert_model_size_type}/{bert_tokenizer_type}/{bert_version}')
 if bert_tokenizer_type == 'roots':
     logging.info(f'Loading roots tokenizer BERT from: {str(bert_folder_path)}')
     bert_tokenizer = AlefBERTRootTokenizer(str(bert_folder_path / 'vocab.txt'))
@@ -171,8 +172,8 @@ xtoken_emb = BertTokenEmbeddingModel(bert, bert_tokenizer)
 label_classifier_configs = []
 for name in label_names:
     config = {'id2label': label_vocab['id2labels'][name]}
-    if name == 'biose_layer0':
-        config['crf_trans_type'] = 'BIOSE'
+    # if name == 'biose_layer0':
+    #     config['crf_trans_type'] = 'BIOSE'
     label_classifier_configs.append(config)
 
 if md_strategry == "morph-pipeline":
