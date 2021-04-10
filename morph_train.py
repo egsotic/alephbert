@@ -8,10 +8,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import BertModel, BertTokenizerFast
 from data import preprocess_form, preprocess_labels
-from model_md import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
+from morph_model import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
 from bclm import treebank as tb, ne_evaluate_mentions
 from hebrew_root_tokenizer import AlefBERTRootTokenizer
-import train_utils
+import utils
 
 # Logging setup
 logger = logging.getLogger(__name__)
@@ -273,17 +273,17 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
             decoded_form_chars = decoded_form_chars[:num_tokens].to('cpu')
             target_labels = [labels[:num_tokens].to('cpu') for labels in target_labels]
             decoded_labels = [labels[:num_tokens].to('cpu') for labels in decoded_labels]
-            input_tokens = train_utils.to_sent_tokens(input_chars, char_vocab['id2char'])
-            target_morph_segments = train_utils.to_token_morph_segments(target_form_chars,
+            input_tokens = utils.to_sent_tokens(input_chars, char_vocab['id2char'])
+            target_morph_segments = utils.to_token_morph_segments(target_form_chars,
                                                                         char_vocab['id2char'],
                                                                         char_eos, char_sep)
-            decoded_morph_segments = train_utils.to_token_morph_segments(decoded_form_chars,
+            decoded_morph_segments = utils.to_token_morph_segments(decoded_form_chars,
                                                                          char_vocab['id2char'],
                                                                          char_eos, char_sep)
-            target_morph_labels = train_utils.to_token_morph_labels(target_labels, label_names,
+            target_morph_labels = utils.to_token_morph_labels(target_labels, label_names,
                                                                     label_vocab['id2labels'],
                                                                     label_pads)
-            decoded_morph_labels = train_utils.to_token_morph_labels(decoded_labels, label_names,
+            decoded_morph_labels = utils.to_token_morph_labels(decoded_labels, label_names,
                                                                      label_vocab['id2labels'],
                                                                      label_pads)
 
@@ -325,7 +325,7 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
             total_target_labels.extend(print_target_labels)
             total_decoded_lattice_rows.extend(print_decoded_lattice_rows)
 
-            aligned_scores, mset_scores = train_utils.morph_eval(print_decoded_forms, print_target_forms)
+            aligned_scores, mset_scores = utils.morph_eval(print_decoded_forms, print_target_forms)
             # print(f'epoch {epoch} {phase}, batch {i + 1} form aligned scores: {aligned_scores}')
             print(f'epoch {epoch} {phase}, batch {i + 1} form mset scores: {mset_scores}')
 
@@ -333,7 +333,7 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
                 if label_names[j][:3].lower() in ['tag', 'bio', 'gen', 'num', 'per', 'ten']:
                     decoded_values = [labels[j] for sent_labels in print_decoded_labels for labels in sent_labels]
                     target_values = [labels[j] for sent_labels in print_target_labels for labels in sent_labels]
-                    aligned_scores, mset_scores = train_utils.morph_eval(decoded_values, target_values)
+                    aligned_scores, mset_scores = utils.morph_eval(decoded_values, target_values)
                     # print(f'epoch {epoch} {phase}, batch {i + 1} {label_names[j]} aligned scores: {aligned_scores}')
                     print(f'epoch {epoch} {phase}, batch {i + 1} {label_names[j]} mset scores: {mset_scores}')
 
@@ -362,11 +362,11 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
         if label_names[j][:3].lower() in ['tag', 'bio', 'gen', 'num', 'per', 'ten']:
             decoded_values = [labels[j] for sent_labels in total_decoded_labels for labels in sent_labels]
             target_values = [labels[j] for sent_labels in total_target_labels for labels in sent_labels]
-            aligned_scores, mset_scores = train_utils.morph_eval(decoded_values, target_values)
+            aligned_scores, mset_scores = utils.morph_eval(decoded_values, target_values)
             # print(f'epoch {epoch} {phase}, total {label_names[j]} aligned scores: {aligned_scores}')
             print(f'epoch {epoch} {phase}, total {label_names[j]} mset scores: {mset_scores}')
 
-    return train_utils.get_lattice_data(total_decoded_lattice_rows, label_names)
+    return utils.get_lattice_data(total_decoded_lattice_rows, label_names)
 
 
 eval_fields = ['form']
@@ -397,21 +397,21 @@ for i in trange(epochs, desc="Epoch"):
     with torch.no_grad():
         dev_samples = process(md_model, dev_dataloader, loss_fct, epoch, 'dev', 1)
         dev_samples.to_csv(out_path / 'dev_samples.csv')
-        train_utils.print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], phase='dev', step=epoch,
+        utils.print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], phase='dev', step=epoch,
                                       fields=eval_fields)
         test_samples = process(md_model, test_dataloader, loss_fct, epoch, 'test', 1)
         test_samples.to_csv(out_path / 'test_samples.csv')
-        train_utils.print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='test', step=epoch,
+        utils.print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='test', step=epoch,
                                       fields=eval_fields)
 
         if 'biose_layer0' in label_names:
-            train_utils.save_ner(dev_samples, out_path / 'morph_label_dev.bmes', 'biose_layer0')
+            utils.save_ner(dev_samples, out_path / 'morph_label_dev.bmes', 'biose_layer0')
             dev_gold_file_path = Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_dev.bmes')
             dev_pred_file_path = out_path / 'morph_label_dev.bmes'
             print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path))
             print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path, ignore_cat=True))
 
-            train_utils.save_ner(test_samples, out_path / 'morph_label_test.bmes', 'biose_layer0')
+            utils.save_ner(test_samples, out_path / 'morph_label_test.bmes', 'biose_layer0')
             test_gold_file_path = Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_test.bmes')
             test_pred_file_path = out_path / 'morph_label_test.bmes'
             print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path))

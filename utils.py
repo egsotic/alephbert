@@ -1,3 +1,4 @@
+import json
 import torch
 import pandas as pd
 from itertools import zip_longest
@@ -116,6 +117,7 @@ def print_eval_scores(decoded_df, truth_df, fields, phase, step):
         print(f'{phase} step {step} mset {fs} eval scores   : [P: {p}, R: {r}, F: {f}]')
 
 
+# Save bmes file used by the ner evaluation script
 def save_ner(df, out_file_path, ner_feat_name):
     gb = df.groupby('sent_id')
     with open(out_file_path, 'w') as f:
@@ -126,4 +128,31 @@ def save_ner(df, out_file_path, ner_feat_name):
                 else:
                     feats = {feat.split('=')[0]: feat.split('=')[1] for feat in row.feats.split('|')}
                 f.write(f"{row.form} {feats[ner_feat_name]}\n")
+            f.write('\n')
+
+
+# Attempt to create a CSV to use as input to the ner_run.py script
+# The CSV option doesn't work though in the script, use the json format instead
+def save_token_classification_finetune_ner_csv(df, out_file_path):
+    gb = df.groupby('sent_id')
+    for i, (sid, group) in enumerate(gb):
+        g = group[['form', 'tag']]
+        g.columns = ['tokens', 'ner_tags']
+        if i == 0:
+            g.to_csv(out_file_path, index=False)
+        else:
+            g.to_csv(out_file_path, index=False, mode='a', header=False)
+        with open(out_file_path, 'a') as f:
+            f.write('\n')
+
+
+# JSON to use as input to the ner_run.py script
+def save_token_classification_finetune_ner_json(df, out_file_path):
+    with open(out_file_path, 'w') as f:
+        gb = df.groupby('sent_id')
+        for sid, group in gb:
+            words = list(group.form)
+            ner = list(group.tag)
+            j = {'words': words, 'ner': ner}
+            json.dump(j, f)
             f.write('\n')

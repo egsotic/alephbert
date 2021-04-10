@@ -1,7 +1,6 @@
 from collections import defaultdict
 from itertools import islice
 import pandas as pd
-from functools import lru_cache
 import sys
 
 
@@ -45,7 +44,7 @@ def read_file_sents(path, comment_prefix='#', field_delim=' ', multi_delim='^', 
     return sents
 
 
-def evaluate_files(gold_path, pred_path, fix_multi_tag_pred=True, truncate=None, ignore_cat=False, str_join_char=' '):
+def evaluate_files(gold_path, pred_path, fix_multi_tag_pred=True, truncate=None, ignore_cat=False, str_join_char=''):
     gold_sents = read_file_sents(gold_path)
     pred_sents = read_file_sents(pred_path)
     gold_mentions = sents_to_mentions(gold_sents, truncate=truncate, ignore_cat=ignore_cat, str_join_char=str_join_char)

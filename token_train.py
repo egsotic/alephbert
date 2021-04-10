@@ -9,7 +9,6 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import BertModel
 from data import preprocess_morph_tag
-
 from collections import Counter
 import pandas as pd
 from bclm import treebank as tb
