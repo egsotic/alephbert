@@ -1,9 +1,9 @@
 import logging
 from pathlib import Path
-from tokenizers import BertWordPieceTokenizer
+from tokenizers.implementations import BertWordPieceTokenizer
 
 
-def train_tokenizer(data_file_paths, vocab_size):
+def train_tokenizer(data_file_paths):
     t = BertWordPieceTokenizer()
     t.train(
         files=data_file_paths,
@@ -28,6 +28,6 @@ logging.basicConfig(
 corpus_type = 'oscar'
 paths = ['data/raw/oscar/he_dedup.txt']
 vocab_size = 52000
-tokenizer = train_tokenizer(paths, vocab_size)
+tokenizer = train_tokenizer(paths)
 tokenizer_folder_path = Path(f'./experiments/tokenizers/bert/wordpiece/bert-wordpiece-{corpus_type}-{vocab_size}')
 tokenizer.save_model(str(tokenizer_folder_path))

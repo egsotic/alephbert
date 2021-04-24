@@ -57,7 +57,7 @@ def get_train_data(max_length, min_length=0):
     ds = load_dataset('text', data_files=paths)
 
     def tokenize_function(examples):
-        examples["text"] = [line for line in examples["text"] if len(line) > 0 and not line.isspace()]
+        examples["text"] = [line for line in examples["text"] if len(line.split()) > 1]
         return tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=False,
                          return_length=True, return_token_type_ids=False, return_attention_mask=False)
     return ds.map(
@@ -83,16 +83,11 @@ def get_train_args(lr=1e-4):
         num_train_epochs=5,
         per_device_train_batch_size=48,
         gradient_accumulation_steps=5,
-        # eval_accumulation_steps=1,
         save_total_limit=0,
         save_steps=0,
         learning_rate=lr,
         # fp16=True,
-        # logging_steps=10000,
-        prediction_loss_only=True,
-        dataloader_num_workers=8,
-        # local_rank=0,
-        # sharded_ddp=True,
+        dataloader_num_workers=8
     )
 
 
