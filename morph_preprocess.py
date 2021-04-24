@@ -17,7 +17,7 @@ if __name__ == '__main__':
     )
 
     tokenizer_type = 'wordpiece'
-    # tokenizer_type = 'roots'
+    # tokenizer_type = 'wordpiece_roots'
     # vocab_size = 52000
     # corpus_name = 'oscar'
     # bert_model_name = 'bert'

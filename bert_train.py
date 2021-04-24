@@ -6,6 +6,14 @@ from transformers.trainer import Trainer
 from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
 from transformers.models.bert.modeling_bert import BertForMaskedLM
+from hebrew_root_tokenizer import AlefBERTRootTokenizer
+
+
+def run_on_ram():
+    import tempfile
+    print(tempfile.tempdir)
+    tempfile.tempdir = '/dev/shm'
+    print(tempfile.tempdir)
 
 
 def get_config():
@@ -19,9 +27,14 @@ def get_config():
 
 
 def get_tokenizer():
-    pretrained_tokenizer_path = Path(f'./experiments/tokenizers/{tokenizer_type}/{tokenizer_type}-{data_source_name}-{vocab_size}')
-    logger.info(f'loading tokenizer {pretrained_tokenizer_path}')
-    return BertTokenizerFast.from_pretrained(str(pretrained_tokenizer_path), max_len=512)
+    tokenizer_root_path = Path('experiments/tokenizers/bert') / tokenizer_type
+    pretrained_tokenizer_path = tokenizer_root_path / f'bert-{tokenizer_type}-{data_source_name}-{vocab_size}'
+    if 'roots' in tokenizer_type:
+        logger.info(f'loading AlefBERTRootTokenizer from {pretrained_tokenizer_path}')
+        return AlefBERTRootTokenizer(pretrained_tokenizer_path / 'vocab.txt')
+    else:
+        logger.info(f'loading BertTokenizerFast from {pretrained_tokenizer_path}')
+        return BertTokenizerFast.from_pretrained(str(pretrained_tokenizer_path), max_len=512)
 
 
 def get_model(model_path=None):
@@ -35,23 +48,23 @@ def get_model(model_path=None):
 
 
 def get_train_data(max_length, min_length=0):
+    # paths = [str(x) for x in Path("/dev/shm/amitse").glob("*.*")]
+    # paths = ['data/raw/oscar/he_dedup.txt', 'data/raw/wikipedia/wikipedia.raw',
+    #          'data/raw/twitter/hebrew_tweets_text_clean_full.txt']
     paths = ['data/raw/oscar/he_dedup.txt']
     logger.info(f'loading training data from: {paths}')
-    # ds = load_dataset('text', data_files=[str(p)], cache_dir='/localdata/amitse/.cache')
+    # ds = load_dataset('text', data_files=[str(p)], cache_dir='/dev/shm/amitse/.cache')
     ds = load_dataset('text', data_files=paths)
 
     def tokenize_function(examples):
         examples["text"] = [line for line in examples["text"] if len(line) > 0 and not line.isspace()]
-#         batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=True, truncation=True, max_length=128)
-        batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=False, return_length=True, return_token_type_ids=False, return_attention_mask=False)
-#         batch_encoding = tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=False, return_length=True, return_token_type_ids=False, return_attention_mask=False, truncation=True)
-        # examples['input_ids'] = [{"input_ids": torch.tensor(e, dtype=torch.long)} for e in batch_encoding["input_ids"]]
-        return batch_encoding
+        return tokenizer(examples["text"], add_special_tokens=True, return_special_tokens_mask=False,
+                         return_length=True, return_token_type_ids=False, return_attention_mask=False)
     return ds.map(
         tokenize_function,
         batched=True,
         num_proc=8,
-    ).filter(lambda e: e['length'] > min_length and e['length'] < max_length)
+    ).filter(lambda e: min_length < e['length'] < max_length)
 
 
 def get_data_collator():
@@ -59,7 +72,10 @@ def get_data_collator():
 
 
 def get_train_args(lr=1e-4):
-    p = Path(f'experiments/transformers/bert/{bert_model_size_type}/{tokenizer_type}') / f'bert-{bert_model_size_type}-{tokenizer_type}-{data_source_name}-{vocab_size}'
+    train_root_path = Path('experiments/transformers/bert') / bert_model_size_type / tokenizer_type
+    p = train_root_path / f'bert-{bert_model_size_type}-{tokenizer_type}-{data_source_name}-{vocab_size}-05-64'
+    # p = train_root_path / f'bert-{bert_model_size_type}-{tokenizer_type}-{data_source_name}-{vocab_size}-05-128'
+    # p = train_root_path / f'bert-{bert_model_size_type}-{tokenizer_type}-{data_source_name}-{vocab_size}-05'
     p.mkdir(parents=True, exist_ok=True)
     return TrainingArguments(
         output_dir=str(p),
@@ -88,22 +104,31 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+# data_source_name = 'owt'
 data_source_name = 'oscar'
-tokenizer_type = 'wordpiece'
-vocab_size = 52000
+# tokenizer_type = 'wordpiece'
+tokenizer_type = 'wordpiece_roots'
+vocab_size = 10000
 num_hidden_layers = 6
-bert_model_size_type = 'small' if num_hidden_layers else 'basic'
-training_args = get_train_args()
+bert_model_size_type = 'small' if num_hidden_layers == 6 else 'basic'
+
+# model_root_path = Path('experiments/transformers/bert') / bert_model_size_type / tokenizer_type
+# model_path = model_root_path / f'bert-{bert_model_size_type}-{tokenizer_type}-{data_source_name}-{vocab_size}-05-64'
+# model, tokenizer = get_model(model_path)
 tokenizer = get_tokenizer()
 model = get_model()
+
 data_collator = get_data_collator()
 train_dataset = get_train_data(64)
+# train_dataset = get_train_data(128, 64)
+# train_dataset = get_train_data(512, 128)
+print(train_dataset['train'])
 
+training_args = get_train_args()
 length_series = train_dataset['train'].data[1].to_pandas()
 print(f'num samples: {len(length_series)}')
 print(f'avg sample length: {length_series.mean(axis=0)}')
 print(f'sample length stddev: {length_series.std(axis=0)}')
-
 
 trainer = Trainer(
     model=model,
@@ -115,5 +140,4 @@ trainer = Trainer(
 set_seed(42)
 trainer.train()
 trainer.save_model()
-# For convenience, we also re-save the tokenizer to the same directory, so that you can share your model easily
 tokenizer.save_pretrained(training_args.output_dir)
