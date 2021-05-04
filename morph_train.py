@@ -22,26 +22,28 @@ logging.basicConfig(
 )
 
 # Config
-# tb_schema = "UD"
-tb_schema = "SPMRL"
+tb_schema = "UD"
+# tb_schema = "SPMRL"
 # tb_data_src = "UD_Hebrew"
 tb_data_src = "for_amit_spmrl"
 # tb_data_src = "HebrewTreebank"
 # tb_name = "HTB"
 tb_name = "hebtb"
 
-bert_tokenizer_type = 'wordpiece'
-# bert_tokenizer_type = 'roots'
-# bert_vocab_size = 52000
-# bert_corpus_name = 'oscar'
-bert_model_size_type = 'basic'
-# bert_model_name = 'bert'
-bert_model_name = 'heBERT'
+# bert_tokenizer_type = 'wordpiece'
+bert_tokenizer_type = 'wordpiece_roots'
+bert_vocab_size = 10000
+epochs = 10
+bert_corpus_name = 'oscar'
+bert_model_size_type = 'small'
+bert_model_name = 'bert'
+# bert_model_name = 'heBERT'
 # bert_model_name = 'mBERT'
-# bert_version = f'{bert_model_name}-{bert_model_size_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
-bert_version = f'{bert_model_name}'
-# tokenizer_version = f'{bert_model_name}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
-tokenizer_version = f'{bert_model_name}'
+bert_version = f'{bert_model_name}-{bert_model_size_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}-{epochs}'
+tokenizer_version = f'{bert_model_name}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
+# tokenizer_version = f'{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
+# bert_version = f'{bert_model_name}'
+# tokenizer_version = f'{bert_model_name}'
 
 md_strategry = "morph-pipeline"
 # md_strategry = "morph-sequence"
@@ -127,7 +129,8 @@ test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
 # Language Model
 bert_folder_path = Path(f'./experiments/transformers/{bert_model_name}/{bert_model_size_type}/{bert_tokenizer_type}/{bert_version}')
-if bert_tokenizer_type == 'roots':
+if bert_tokenizer_type == 'wordpiece_roots':
+    bert_folder_path = Path(f'./experiments/transformers/{bert_model_name}/{bert_model_size_type}/wordpiece/{bert_version}')
     logging.info(f'Loading roots tokenizer BERT from: {str(bert_folder_path)}')
     bert_tokenizer = AlefBERTRootTokenizer(str(bert_folder_path / 'vocab.txt'))
     bert = BertModel.from_pretrained(str(bert_folder_path))
@@ -187,7 +190,7 @@ elif md_strategry == "morph-sequence":
 else:
     segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
     md_model = MorphSequenceModel(xtoken_emb, segmentor)
-device = None
+device = 1
 char_special_symbols = {sos: char_sos.to(device), eos: char_eos.to(device),
                         sep: char_sep.to(device), pad: char_pad.to(device)}
 if device is not None:

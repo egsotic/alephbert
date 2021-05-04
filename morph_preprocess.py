@@ -16,17 +16,20 @@ if __name__ == '__main__':
         level=logging.INFO
     )
 
-    tokenizer_type = 'wordpiece'
-    # tokenizer_type = 'wordpiece_roots'
-    # vocab_size = 52000
-    # corpus_name = 'oscar'
-    # bert_model_name = 'bert'
-    # bert_model_name = 'mBERT'
-    bert_model_name = 'heBERT'
-    # tokenizer_version = f'{bert_model_name}-{tokenizer_type}-{corpus_name}-{vocab_size}'
-    tokenizer_version = f'{bert_model_name}'
+    # tokenizer_type = 'wordpiece'
+    tokenizer_type = 'wordpiece_roots'
+    transformer_type = 'bert'
+    # transformer_type = 'mBERT'
+    # transformer_type = 'heBERT'
+    vocab_size = 10000
+    corpus_name = 'oscar'
+    tokenizer_version = f'{tokenizer_type}-{corpus_name}-{vocab_size}'
+    if transformer_type == 'bert':
+        transformer_type = f'{transformer_type}-{tokenizer_version}'
+    else:
+        tokenizer_version = transformer_type
 
-    dev_root_path = Path('/Users/Amit/dev')
+    dev_root_path = Path('/home/amit/dev')
     tb_root_path = dev_root_path / 'onlplab'
 
     # tb_root_path = tb_root_path / 'UniversalDependencies'
@@ -38,7 +41,7 @@ if __name__ == '__main__':
     # raw_root_path = Path('data/raw/HebrewTreebank')
 
     # preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{tokenizer_version}')
-    preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{tokenizer_version}')
+    preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{transformer_type}')
     # preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{tokenizer_version}')
     preprocessed_root_path.mkdir(parents=True, exist_ok=True)
 
@@ -51,14 +54,14 @@ if __name__ == '__main__':
         raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb')
         # raw_partition = tb.spmrl(raw_root_path, 'hebtb')
 
-    bert_root_path = Path(f'./experiments/tokenizers/bert/{tokenizer_type}/{tokenizer_version}')
-    # bert_root_path = Path(f'./experiments/transformers/bert/{bert_model_size}/{tokenizer_type}/{bert_version}')
-    if tokenizer_type == 'roots':
+    bert_root_path = Path(f'./experiments/tokenizers/{tokenizer_type}/{tokenizer_version}')
+    if tokenizer_type == 'wordpiece_roots':
+        bert_root_path = Path(f'./experiments/tokenizers/wordpiece/{tokenizer_version}')
         bert_tokenizer = AlefBERTRootTokenizer(str(bert_root_path / 'vocab.txt'))
-    elif bert_model_name == 'mBERT':
-        bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-uncased')
-    elif bert_model_name == 'heBERT':
-        bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{bert_model_name}')
+    elif tokenizer_type == 'mBERT':
+        bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-cased')
+    elif tokenizer_type == 'heBERT':
+        bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{tokenizer_type}')
     else:
         bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_root_path))
 
@@ -67,7 +70,7 @@ if __name__ == '__main__':
     token_char_data = get_token_char_data(preprocessed_root_path, morph_data)
     xtoken_df = get_xtoken_data(preprocessed_root_path, morph_data, bert_tokenizer, sos=sos, eos=eos)
 
-    ft_root_path = dev_root_path / 'fastText'
+    ft_root_path = dev_root_path / 'facebookresearch' / 'fastText'
     save_char_vocab(preprocessed_root_path, ft_root_path, raw_partition, pad=pad, sep=sep, sos=sos, eos=eos)
     char_vectors, char_vocab = load_char_vocab(preprocessed_root_path)
     label_vocab = load_label_vocab(preprocessed_root_path, morph_data, pad=pad)

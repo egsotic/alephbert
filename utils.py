@@ -117,6 +117,24 @@ def print_eval_scores(decoded_df, truth_df, fields, phase, step):
         print(f'{phase} step {step} mset {fs} eval scores   : [P: {p}, R: {r}, F: {f}]')
 
 
+# 0	1	גנן	גנן	NN	NN	gen=M|num=S	1
+# 1	2	גידל	גידל	VB	VB	gen=M|num=S|per=3|tense=PAST	2
+# 2	3	דגן	דגן	NN	NN	gen=M|num=S	3
+# 3	4	ב	ב	PREPOSITION	PREPOSITION	_	4
+# 4	5	ה	ה	DEF	DEF	_	4
+# 5	6	גן	גן	NN	NN	gen=M|num=S	4
+# 6	7	.	_	yyDOT	yyDOT	_	5
+def save_lattice(df, out_file_path):
+    gb = df.groupby('sent_id')
+    with open(out_file_path, 'w') as f:
+        for sid, group in gb:
+            # for row in group[['from_node', 'to_node', 'form', 'lemma', 'tag', 'feats', 'token_id']].itertuples():
+            for row in group.iterrows():
+                lattice_line = '\t'.join([str(v) for v in row[1][['from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'tag', 'feats', 'token_id']].tolist()])
+                f.write(f'{lattice_line}\n')
+            f.write('\n')
+
+
 # Save bmes file used by the ner evaluation script
 def save_ner(df, out_file_path, ner_feat_name):
     gb = df.groupby('sent_id')

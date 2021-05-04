@@ -29,5 +29,5 @@ corpus_type = 'oscar'
 paths = ['data/raw/oscar/he_dedup.txt']
 vocab_size = 52000
 tokenizer = train_tokenizer(paths)
-tokenizer_folder_path = Path(f'./experiments/tokenizers/bert/wordpiece/bert-wordpiece-{corpus_type}-{vocab_size}')
+tokenizer_folder_path = Path(f'./experiments/tokenizers/wordpiece/wordpiece-{corpus_type}-{vocab_size}')
 tokenizer.save_model(str(tokenizer_folder_path))
