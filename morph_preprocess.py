@@ -40,9 +40,9 @@ if __name__ == '__main__':
     raw_root_path = Path('data/raw/for_amit_spmrl')
     # raw_root_path = Path('data/raw/HebrewTreebank')
 
-    # preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{tokenizer_version}')
+    # preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{transformer_type}')
     preprocessed_root_path = Path(f'data/preprocessed/for_amit_spmrl/hebtb/{transformer_type}')
-    # preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{tokenizer_version}')
+    # preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{transformer_type}')
     preprocessed_root_path.mkdir(parents=True, exist_ok=True)
 
     if not raw_root_path.exists():
