@@ -433,3 +433,6 @@ for i in trange(epochs, desc="Epoch"):
             test_pred_file_path = out_path / 'morph_label_test.bmes'
             print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path))
             print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path, ignore_cat=True))
+
+# save model
+torch.save(md_model, out_path / "md_model.pt")
