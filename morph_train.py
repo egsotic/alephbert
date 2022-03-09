@@ -1,17 +1,20 @@
-import random
 import logging
+import random
 from pathlib import Path
+
 import torch
-import torch.optim as optim
 import torch.nn as nn
+import torch.optim as optim
+import tqdm
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
 from transformers import BertModel, BertTokenizerFast
-from data import preprocess_form, preprocess_labels
-from morph_model import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
-from bclm import treebank as tb, ne_evaluate_mentions
-from hebrew_root_tokenizer import AlefBERTRootTokenizer
+
 import utils
+from bclm import treebank as tb, ne_evaluate_mentions
+from data import preprocess_form, preprocess_labels
+from hebrew_root_tokenizer import AlefBERTRootTokenizer
+from morph_model import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
 
 # Logging setup
 logger = logging.getLogger(__name__)
@@ -22,35 +25,40 @@ logging.basicConfig(
 )
 
 # Config
-tb_schema = "UD"
-# tb_schema = "SPMRL"
+# tb_schema = "UD"
+tb_schema = "SPMRL"
 # tb_data_src = "UD_Hebrew"
 tb_data_src = "for_amit_spmrl"
 # tb_data_src = "HebrewTreebank"
 # tb_name = "HTB"
 tb_name = "hebtb"
 
-# bert_tokenizer_type = 'wordpiece'
-bert_tokenizer_type = 'wordpiece_roots'
-bert_vocab_size = 10000
-epochs = 10
-bert_corpus_name = 'oscar'
-bert_model_size_type = 'small'
+bert_tokenizer_type = 'wordpiece'
+# bert_tokenizer_type = 'wordpiece_roots'
+# bert_vocab_size = 10000
+bert_vocab_size = 52000
+bert_epochs = 10
+# bert_corpus_name = 'oscar'
+bert_corpus_name = 'owt'
+# bert_model_size_type = 'small'
+bert_model_size_type = 'basic'
 bert_model_name = 'bert'
 # bert_model_name = 'heBERT'
 # bert_model_name = 'mBERT'
-bert_version = f'{bert_model_name}-{bert_model_size_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}-{epochs}'
+bert_version = f'{bert_model_name}-{bert_model_size_type}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}-{bert_epochs}'
 tokenizer_version = f'{bert_model_name}-{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
 # tokenizer_version = f'{bert_tokenizer_type}-{bert_corpus_name}-{bert_vocab_size}'
 # bert_version = f'{bert_model_name}'
 # tokenizer_version = f'{bert_model_name}'
 
-md_strategry = "morph-pipeline"
-# md_strategry = "morph-sequence"
+# md_strategry = "morph-pipeline"
+md_strategry = "morph-sequence"
 # md_strategry = "segment-only"
 
 # Data
-raw_root_path = Path(f'data/raw/{tb_data_src}')
+root_path = Path('/home/nlp/egsotic/repo/alephbert/')
+
+raw_root_path = root_path / Path(f'data/raw/{tb_data_src}')
 if tb_name == 'HTB':
     partition = tb.ud(raw_root_path, tb_name)
 elif tb_name == 'hebtb':
@@ -60,7 +68,7 @@ elif tb_name == 'hebtb':
         partition = tb.spmrl(raw_root_path, tb_name)
 else:
     partition = {'train': None, 'dev': None, 'test': None}
-preprocessed_data_root_path = Path(f'data/preprocessed/{tb_data_src}/{tb_name}/{tokenizer_version}')
+preprocessed_data_root_path = root_path / Path(f'data/preprocessed/{tb_data_src}/{tb_name}/{tokenizer_version}')
 
 
 def load_preprocessed_data_samples(data_root_path, partition, label_names) -> dict:
@@ -80,8 +88,8 @@ def load_preprocessed_data_samples(data_root_path, partition, label_names) -> di
 
 
 datasets = {}
-# label_names = ['tag']
-label_names = ['biose_layer0']
+label_names = ['tag']
+# label_names = ['biose_layer0']
 # label_names = ['tag', 'biose_layer0']
 # label_names = ['tag', 'Gender', 'Number', 'Person', 'Tense']
 # label_names = []
@@ -102,7 +110,7 @@ else:
         out_morph_type = f'{out_morph_type}_tag_feats'
     else:
         out_morph_type = f'{out_morph_type}_feats'
-out_base = Path(f'experiments/{out_morph_type}/{bert_model_name}')
+out_base = root_path / Path(f'experiments/{out_morph_type}/{bert_model_name}')
 # out_path = out_base / bert_model_type / bert_tokenizer_type / bert_version / tb_data_src / tb_name
 out_path = out_base / bert_model_size_type / bert_version / tb_data_src / tb_name
 out_path.mkdir(parents=True, exist_ok=True)
@@ -128,9 +136,11 @@ dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
 test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
 # Language Model
-bert_folder_path = Path(f'./experiments/transformers/{bert_model_name}/{bert_model_size_type}/{bert_tokenizer_type}/{bert_version}')
+bert_folder_path = root_path / Path(
+    f'experiments/transformers/{bert_model_name}/{bert_model_size_type}/{bert_tokenizer_type}/{bert_version}')
 if bert_tokenizer_type == 'wordpiece_roots':
-    bert_folder_path = Path(f'./experiments/transformers/{bert_model_name}/{bert_model_size_type}/wordpiece/{bert_version}')
+    bert_folder_path = Path(
+        f'./experiments/transformers/{bert_model_name}/{bert_model_size_type}/wordpiece/{bert_version}')
     logging.info(f'Loading roots tokenizer BERT from: {str(bert_folder_path)}')
     bert_tokenizer = AlefBERTRootTokenizer(str(bert_folder_path / 'vocab.txt'))
     bert = BertModel.from_pretrained(str(bert_folder_path))
@@ -147,7 +157,6 @@ else:
     bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_folder_path))
     bert = BertModel.from_pretrained(str(bert_folder_path))
 logging.info('BERT model and tokenizer loaded')
-
 
 # Vocabs
 pad, sos, eos, sep = '<pad>', '<s>', '</s>', '<sep>'
@@ -209,7 +218,7 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
     print_decoded_labels, total_decoded_labels = [], []
     print_decoded_lattice_rows, total_decoded_lattice_rows = [], []
 
-    for i, batch in enumerate(data):
+    for i, batch in tqdm.tqdm(enumerate(data), desc="batch"):
         batch = tuple(t.to(device) for t in batch)
         batch_form_scores, batch_label_scores, batch_form_targets, batch_label_targets = [], [], [], []
         batch_token_chars, batch_sent_ids, batch_num_tokens = [], [], []
@@ -256,7 +265,7 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
         if optimizer is not None:
             form_loss.backward(retain_graph=len(label_losses) > 0)
             for j in range(len(label_losses)):
-                label_losses[j].backward(retain_graph=(j < len(label_losses)-1))
+                label_losses[j].backward(retain_graph=(j < len(label_losses) - 1))
             if max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
@@ -278,17 +287,17 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
             decoded_labels = [labels[:num_tokens].to('cpu') for labels in decoded_labels]
             input_tokens = utils.to_sent_tokens(input_chars, char_vocab['id2char'])
             target_morph_segments = utils.to_token_morph_segments(target_form_chars,
-                                                                        char_vocab['id2char'],
-                                                                        char_eos, char_sep)
+                                                                  char_vocab['id2char'],
+                                                                  char_eos, char_sep)
             decoded_morph_segments = utils.to_token_morph_segments(decoded_form_chars,
-                                                                         char_vocab['id2char'],
-                                                                         char_eos, char_sep)
+                                                                   char_vocab['id2char'],
+                                                                   char_eos, char_sep)
             target_morph_labels = utils.to_token_morph_labels(target_labels, label_names,
-                                                                    label_vocab['id2labels'],
-                                                                    label_pads)
+                                                              label_vocab['id2labels'],
+                                                              label_pads)
             decoded_morph_labels = utils.to_token_morph_labels(decoded_labels, label_names,
-                                                                     label_vocab['id2labels'],
-                                                                     label_pads)
+                                                               label_vocab['id2labels'],
+                                                               label_pads)
 
             decoded_token_lattice_rows = (sent_id, input_tokens, decoded_morph_segments, decoded_morph_labels)
             print_decoded_lattice_rows.append(decoded_token_lattice_rows)
@@ -307,15 +316,20 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
 
             print(f'epoch {epoch} {phase}, batch {i + 1} form char loss: {print_form_loss / print_every}')
             for j in range(len(label_names)):
-                print(f'epoch {epoch} {phase}, batch {i + 1} {label_names[j]} loss: {print_label_losses[j] / print_every}')
+                print(
+                    f'epoch {epoch} {phase}, batch {i + 1} {label_names[j]} loss: {print_label_losses[j] / print_every}')
             print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} input tokens  : {input_tokens}')
-            print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} target forms  : {list(reversed(target_segments))}')
-            print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} decoded forms : {list(reversed(decoded_segments))}')
+            print(
+                f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} target forms  : {list(reversed(target_segments))}')
+            print(
+                f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} decoded forms : {list(reversed(decoded_segments))}')
             for j in range(len(label_names)):
                 target_values = [labels[j] for labels in target_labels]
-                print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} target {label_names[j]} labels  : {list(reversed([target_values]))}')
+                print(
+                    f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} target {label_names[j]} labels  : {list(reversed([target_values]))}')
                 decoded_values = [labels[j] for labels in decoded_labels]
-                print(f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} decoded {label_names[j]} labels : {list(reversed([decoded_values]))}')
+                print(
+                    f'epoch {epoch} {phase}, batch {i + 1} sent #{sent_id} decoded {label_names[j]} labels : {list(reversed([decoded_values]))}')
             total_form_loss += print_form_loss
             for j, label_loss in enumerate(print_label_losses):
                 total_label_losses[j] += label_loss
@@ -401,21 +415,21 @@ for i in trange(epochs, desc="Epoch"):
         dev_samples = process(md_model, dev_dataloader, loss_fct, epoch, 'dev', 1)
         dev_samples.to_csv(out_path / 'dev_samples.csv')
         utils.print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], phase='dev', step=epoch,
-                                      fields=eval_fields)
+                                fields=eval_fields)
         test_samples = process(md_model, test_dataloader, loss_fct, epoch, 'test', 1)
         test_samples.to_csv(out_path / 'test_samples.csv')
         utils.print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='test', step=epoch,
-                                      fields=eval_fields)
+                                fields=eval_fields)
 
         if 'biose_layer0' in label_names:
             utils.save_ner(dev_samples, out_path / 'morph_label_dev.bmes', 'biose_layer0')
-            dev_gold_file_path = Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_dev.bmes')
+            dev_gold_file_path = root_path / Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_dev.bmes')
             dev_pred_file_path = out_path / 'morph_label_dev.bmes'
             print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path))
             print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path, ignore_cat=True))
 
             utils.save_ner(test_samples, out_path / 'morph_label_test.bmes', 'biose_layer0')
-            test_gold_file_path = Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_test.bmes')
+            test_gold_file_path = root_path / Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_test.bmes')
             test_pred_file_path = out_path / 'morph_label_test.bmes'
             print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path))
             print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path, ignore_cat=True))
