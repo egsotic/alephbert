@@ -28,7 +28,8 @@ logging.basicConfig(
 # tb_schema = "UD"
 tb_schema = "SPMRL"
 # tb_data_src = "UD_Hebrew"
-tb_data_src = "for_amit_spmrl"
+# tb_data_src = "for_amit_spmrl"
+tb_data_src = "playground"
 # tb_data_src = "HebrewTreebank"
 # tb_name = "HTB"
 tb_name = "hebtb"
@@ -88,17 +89,25 @@ def load_preprocessed_data_samples(data_root_path, partition, label_names) -> di
 
 
 datasets = {}
-label_names = ['tag']
+
+IGNORE_LABEL = 'ignore'
+
+# label_names = ['tag']
 # label_names = ['biose_layer0']
 # label_names = ['tag', 'biose_layer0']
 # label_names = ['tag', 'Gender', 'Number', 'Person', 'Tense']
+label_names = ['tag', 'gen', 'num', 'per',
+               IGNORE_LABEL]  # , 'HebBinyan', 'tense', 'suf_gen', 'suf_num', 'suf_per', 'polar']
+IGNORE_LABEL_INDEX = label_names.index(IGNORE_LABEL) if IGNORE_LABEL in label_names else None
+
 # label_names = []
 # label_names = None
 if label_names is None:
     label_names = preprocess_labels.get_label_names(preprocessed_data_root_path, partition)
 
 # Output folder path
-out_morph_type = 'morph_seg'
+# out_morph_type = 'morph_seg'
+out_morph_type = 'test_morph_seg'
 if len(label_names) == 0:
     pass
 elif len(label_names) == 1:
@@ -209,7 +218,9 @@ print(md_model)
 
 # Training and evaluation routine
 def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntropyLoss, epoch, phase, print_every,
-            teacher_forcing_ratio=0.0, optimizer: optim.AdamW = None, max_grad_norm=None):
+            teacher_forcing_ratio=0.0, optimizer: optim.AdamW = None, max_grad_norm=None,
+            # ignore - for loss mask
+            ignore_label_index=None, ignore_label='ignore', ignore_label_true='0'):
     print_form_loss, total_form_loss = 0, 0
     print_label_losses, total_label_losses = [0 for _ in range(len(label_names))], [0 for _ in range(len(label_names))]
     print_target_forms, total_target_forms = [], []
@@ -248,16 +259,44 @@ def process(model: MorphSequenceModel, data: DataLoader, criterion: nn.CrossEntr
         with torch.no_grad():
             batch_decoded_chars, batch_decoded_labels = model.decode(batch_form_scores, batch_label_scores)
 
-        # Form Loss
+        # prepare for loss
+        # form
         batch_form_targets = nn.utils.rnn.pad_sequence(batch_form_targets, batch_first=True)
-        form_loss = model.form_loss(batch_form_scores, batch_form_targets, criterion)
-        print_form_loss += form_loss.item()
-
-        # Label Losses
+        # labels
         batch_label_targets = [[t[:, :, j] for j in range(t.shape[-1])] for t in batch_label_targets]
         batch_label_targets = [nn.utils.rnn.pad_sequence(label_targets, batch_first=True)
                                for label_targets in list(map(list, zip(*batch_label_targets)))]
-        label_losses = model.labels_losses(batch_label_scores, batch_label_targets, criterion)
+
+        # loss mask - ignore form and labels in loss calc.
+        form_loss_mask = None
+        label_loss_mask = None
+
+        if ignore_label_index is not None:
+            label_loss_mask = batch_label_targets[ignore_label_index] == label_vocab['labels2id'][ignore_label][
+                ignore_label_true]
+            # True if all token's morphemes aren't ignored
+            form_loss_mask = (label_loss_mask.all(dim=-1).unsqueeze(dim=2)).expand_as(batch_form_targets)
+
+        # Form Loss
+        batch_form_targets_for_loss = batch_form_targets
+        if form_loss_mask is not None:
+            batch_form_targets_for_loss = torch.where(form_loss_mask, batch_form_targets, criterion.ignore_index)
+
+        form_loss = model.form_loss(batch_form_scores, batch_form_targets_for_loss, criterion)
+        print_form_loss += form_loss.item()
+
+        # Label Losses
+        batch_label_targets_for_loss = batch_label_targets
+        if label_loss_mask is not None:
+            batch_label_targets_for_loss = [
+                torch.where(label_loss_mask, _batch_label_targets, criterion.ignore_index)
+                for i, _batch_label_targets in enumerate(batch_label_targets)
+            ]
+
+            # ignore the "ignore labels" - they are not a task to be predicted
+            batch_label_targets_for_loss[ignore_label_index][:] = criterion.ignore_index
+
+        label_losses = model.labels_losses(batch_label_scores, batch_label_targets_for_loss, criterion)
         for j in range(len(label_losses)):
             print_label_losses[j] += label_losses[j].item()
 
@@ -409,14 +448,17 @@ teacher_forcing_ratio = 1.0
 for i in trange(epochs, desc="Epoch"):
     epoch = i + 1
     md_model.train()
-    process(md_model, train_dataloader, loss_fct, epoch, 'train', 10, teacher_forcing_ratio, adam, max_grad_norm)
+    process(md_model, train_dataloader, loss_fct, epoch, 'train', 10, teacher_forcing_ratio, adam, max_grad_norm,
+            ignore_label_index=IGNORE_LABEL_INDEX)
     md_model.eval()
     with torch.no_grad():
-        dev_samples = process(md_model, dev_dataloader, loss_fct, epoch, 'dev', 1)
+        dev_samples = process(md_model, dev_dataloader, loss_fct, epoch, 'dev', 1,
+                              ignore_label_index=IGNORE_LABEL_INDEX)
         dev_samples.to_csv(out_path / 'dev_samples.csv')
         utils.print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], phase='dev', step=epoch,
                                 fields=eval_fields)
-        test_samples = process(md_model, test_dataloader, loss_fct, epoch, 'test', 1)
+        test_samples = process(md_model, test_dataloader, loss_fct, epoch, 'test', 1,
+                               ignore_label_index=IGNORE_LABEL_INDEX)
         test_samples.to_csv(out_path / 'test_samples.csv')
         utils.print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='test', step=epoch,
                                 fields=eval_fields)
