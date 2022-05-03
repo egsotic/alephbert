@@ -1,3 +1,6 @@
+import argparse
+import json
+
 from bclm import treebank as tb
 from data.preprocess_form import *
 from data.preprocess_labels import *
@@ -6,54 +9,39 @@ from hebrew_root_tokenizer import AlefBERTRootTokenizer
 pad, sos, eos, sep = '<pad>', '<s>', '</s>', '<sep>'
 
 
-if __name__ == '__main__':
+def main(config):
     # Setup logging
-    logger = logging.getLogger(__name__)
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO
     )
 
-    tokenizer_type = 'wordpiece'
-    # tokenizer_type = 'wordpiece_roots'
-    transformer_type = 'bert'
-    # transformer_type = 'mBERT'
-    # transformer_type = 'heBERT'
-    # vocab_size = 10000
-    vocab_size = 52000
-    corpus_name = 'owt'
+    # config
+    tokenizer_type = config['tokenizer_type']
+    transformer_type = config['transformer_type']
+    vocab_size = config['vocab_size']
+    corpus_name = config['corpus_name']
+
+    tb_root_path = Path(config['tb_root_path'])
+    raw_root_path = Path(config['raw_root_path'])
+    preprocessed_root_path = Path(config['preprocessed_root_path'])
+    fasttext_lang = config['fasttext_lang']
+    fasttext_model_path = Path(config['fasttext_model_path'])
+
     tokenizer_version = f'{tokenizer_type}-{corpus_name}-{vocab_size}'
     if transformer_type == 'bert':
         transformer_type = f'{transformer_type}-{tokenizer_version}'
     else:
         tokenizer_version = transformer_type
 
-    root_path = Path('/home/nlp/egsotic/repo/alephbert/')
-
-    tb_root_path = Path('/home/nlp/egsotic/data/onlplab/')
-
-    # tb_root_path = tb_root_path / 'UniversalDependencies'
-    tb_root_path = tb_root_path / 'HebrewResources/for_amit_spmrl'
-    # tb_root_path = tb_root_path / 'HebrewResources/HebrewTreebank'
-
-    # raw_root_path = Path('data/raw/UD_Hebrew')
-    raw_root_path = root_path / Path('data/raw/for_amit_spmrl')
-    # raw_root_path = Path('data/raw/HebrewTreebank')
-
-    # preprocessed_root_path = Path(f'data/preprocessed/UD_Hebrew/HTB/{transformer_type}')
-    preprocessed_root_path = root_path / Path(f'data/preprocessed/for_amit_spmrl/hebtb/{transformer_type}')
-    # preprocessed_root_path = Path(f'data/preprocessed/HebrewTreebank/hebtb/{transformer_type}')
-    preprocessed_root_path.mkdir(parents=True, exist_ok=True)
+    preprocessed_root_path = preprocessed_root_path / transformer_type
+    preprocessed_root_path.mkdir(parents=True, exist_ok=False)
 
     if not raw_root_path.exists():
-        # raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path)
-        raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb', tb_root_path)
-        # raw_partition = tb.spmrl(raw_root_path, 'hebtb', tb_root_path)
+        raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path=tb_root_path)
     else:
-        # raw_partition = tb.ud(raw_root_path, 'HTB')
-        raw_partition = tb.spmrl_ner_conllu(raw_root_path, 'hebtb')
-        # raw_partition = tb.spmrl(raw_root_path, 'hebtb')
+        raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path=None)
 
     bert_root_path = Path(f'./experiments/tokenizers/{tokenizer_type}/{tokenizer_version}')
     if tokenizer_type == 'wordpiece_roots':
@@ -71,8 +59,8 @@ if __name__ == '__main__':
     token_char_data = get_token_char_data(preprocessed_root_path, morph_data)
     xtoken_df = get_xtoken_data(preprocessed_root_path, morph_data, bert_tokenizer, sos=sos, eos=eos)
 
-    ft_root_path = Path("/home/nlp/amitse/facebookresearch/fastText/")
-    save_char_vocab(preprocessed_root_path, ft_root_path, raw_partition, pad=pad, sep=sep, sos=sos, eos=eos)
+    save_char_vocab(preprocessed_root_path, fasttext_lang, fasttext_model_path, raw_partition,
+                    pad=pad, sep=sep, sos=sos, eos=eos)
     char_vectors, char_vocab = load_char_vocab(preprocessed_root_path)
     label_vocab = load_label_vocab(preprocessed_root_path, morph_data, pad=pad)
 
@@ -80,3 +68,18 @@ if __name__ == '__main__':
     save_token_char_data_samples(preprocessed_root_path, token_char_data, char_vocab['char2id'], pad=pad)
     save_form_char_data_samples(preprocessed_root_path, morph_form_char_data, char_vocab['char2id'], pad=pad)
     save_labeled_data_samples(preprocessed_root_path, morph_data, label_vocab['labels2id'], pad=pad)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config_path', type=Path, help='config path')
+    args = parser.parse_args()
+
+    config_path = args.config_path
+
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+
+    logging.info(config)
+
+    main(config)

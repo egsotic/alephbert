@@ -1,10 +1,12 @@
-from transformers import BertTokenizerFast
-import pandas as pd
-import numpy as np
-from tqdm import tqdm
 import logging
-import fasttext_emb as ft
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from transformers import BertTokenizerFast
+
+import fasttext_emb as ft
 
 
 def _insert_morph_id_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -115,7 +117,7 @@ def _collate_token_chars(token_char_df: pd.DataFrame, char2id: dict, pad) -> pd.
     return pd.DataFrame(data_rows, columns=data_column_names)
 
 
-def save_char_vocab(data_path: Path, ft_root_path: Path, raw_partition: dict, pad, sep, sos, eos):
+def save_char_vocab(data_path: Path, ft_lang: str, ft_model_path: Path, raw_partition: dict, pad, sep, sos, eos):
     logging.info(f'saving char embedding')
     tokens = set(token for part in raw_partition for token in raw_partition[part].token)
     forms = set(token for part in raw_partition for token in raw_partition[part].form)
@@ -123,7 +125,7 @@ def save_char_vocab(data_path: Path, ft_root_path: Path, raw_partition: dict, pa
     # chars = set(c.lower() for word in list(tokens) + list(forms) + list(lemmas) for c in word)
     chars = set(c for word in list(tokens) + list(forms) + list(lemmas) for c in word)
     chars = [pad, sep, sos, eos] + sorted(list(chars))
-    char_vectors, char2id = ft.get_word_vectors('he', ft_root_path / 'models/cc.he.300.bin', chars)
+    char_vectors, char2id = ft.get_word_vectors(ft_lang, ft_model_path, chars)
     ft.save_word_vectors(data_path / 'ft_char.vec.txt', char_vectors, char2id)
 
 
