@@ -1,0 +1,18 @@
+{
+  "tb_schema": "UD",
+  "tb_data_src": "heb_tb1_tb2-train_tb1",
+  "tb_name": "HTB",
+  "raw_root_path": "/home/nlp/egsotic/repo/alephbert/data/raw/heb_tb1_tb2/train_tb1",
+  "preprocessed_root_path": "/home/nlp/egsotic/repo/alephbert/data/preprocessed/heb_tb1_tb2/train_tb1/bert-wordpiece-owt-52000/",
+  "out_root_path": "/home/nlp/egsotic/repo/alephbert/experiments",
+  "bert_tokenizer_name": "AlephBERT",
+  "bert_tokenizer_path": "onlplab/alephbert-base",
+  "bert_model_name": "AlephBERT",
+  "bert_model_path": "onlplab/alephbert-base",
+  "md_strategry": "morph-sequence",
+  "label_names": [
+    "tag"
+  ],
+  "device": "auto",
+  "epochs": 3
+}

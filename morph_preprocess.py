@@ -2,11 +2,10 @@ import argparse
 import json
 
 from bclm import treebank as tb
+from constants import PAD, SOS, EOS, SEP
 from data.preprocess_form import *
 from data.preprocess_labels import *
 from hebrew_root_tokenizer import AlefBERTRootTokenizer
-
-pad, sos, eos, sep = '<pad>', '<s>', '</s>', '<sep>'
 
 
 def main(config):
@@ -55,19 +54,19 @@ def main(config):
         bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_root_path))
 
     morph_data = get_morph_data(preprocessed_root_path, raw_partition)
-    morph_form_char_data = get_form_char_data(preprocessed_root_path, morph_data, sep=sep, eos=eos)
+    morph_form_char_data = get_form_char_data(preprocessed_root_path, morph_data, sep=SEP, eos=EOS)
     token_char_data = get_token_char_data(preprocessed_root_path, morph_data)
-    xtoken_df = get_xtoken_data(preprocessed_root_path, morph_data, bert_tokenizer, sos=sos, eos=eos)
+    xtoken_df = get_xtoken_data(preprocessed_root_path, morph_data, bert_tokenizer, sos=SOS, eos=EOS)
 
     save_char_vocab(preprocessed_root_path, fasttext_lang, fasttext_model_path, raw_partition,
-                    pad=pad, sep=sep, sos=sos, eos=eos)
+                    pad=PAD, sep=SEP, sos=SOS, eos=EOS)
     char_vectors, char_vocab = load_char_vocab(preprocessed_root_path)
-    label_vocab = load_label_vocab(preprocessed_root_path, morph_data, pad=pad)
+    label_vocab = load_label_vocab(preprocessed_root_path, morph_data, pad=PAD)
 
-    save_xtoken_data_samples(preprocessed_root_path, xtoken_df, bert_tokenizer, pad=pad)
-    save_token_char_data_samples(preprocessed_root_path, token_char_data, char_vocab['char2id'], pad=pad)
-    save_form_char_data_samples(preprocessed_root_path, morph_form_char_data, char_vocab['char2id'], pad=pad)
-    save_labeled_data_samples(preprocessed_root_path, morph_data, label_vocab['labels2id'], pad=pad)
+    save_xtoken_data_samples(preprocessed_root_path, xtoken_df, bert_tokenizer, pad=PAD)
+    save_token_char_data_samples(preprocessed_root_path, token_char_data, char_vocab['char2id'], pad=PAD)
+    save_form_char_data_samples(preprocessed_root_path, morph_form_char_data, char_vocab['char2id'], pad=PAD)
+    save_labeled_data_samples(preprocessed_root_path, morph_data, label_vocab['labels2id'], pad=PAD)
 
 
 if __name__ == '__main__':

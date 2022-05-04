@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import BertModel, BertTokenizer
+
 from conditional_random_field import ConditionalRandomField, allowed_transitions
+from constants import SOS, EOS, SEP
 
 
 def compute_loss(scores, targets, criterion: nn.CrossEntropyLoss):
@@ -139,7 +141,7 @@ class SegmentDecoder(nn.Module):
     def forward(self, char_seq, enc_state, special_symbols, max_out_char_seq_len, target_char_seq, max_num_labels):
         char_scores, char_states, label_scores = [], [], []
         enc_output, dec_char_state = self._forward_encode(char_seq, enc_state)
-        sos, eos, sep = special_symbols['<s>'], special_symbols['</s>'], special_symbols['<sep>']
+        sos, eos, sep = special_symbols[SOS], special_symbols[EOS], special_symbols[SEP]
         dec_char = sos
         for _ in self.classifiers:
             label_scores.append([])

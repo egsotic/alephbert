@@ -1,8 +1,10 @@
 import json
-import torch
-import pandas as pd
-from itertools import zip_longest
 from collections import Counter
+from itertools import zip_longest
+
+import pandas as pd
+import torch
+
 from bclm import treebank as tb
 
 
@@ -69,7 +71,7 @@ def _to_sent_token_lattice_rows(sent_id, tokens, token_segments, token_labels, l
         tags = labels['tag'] if 'tag' in labels else []
         feats_strs = _to_feats_strs({k: v for k, v in labels.items() if k != 'tag'})
         for form, tag, feat in zip_longest(forms, tags, feats_strs, fillvalue='_'):
-            row = [sent_id, node_id, node_id+1, form, '_', tag, feat, token_id+1, token, True]
+            row = [sent_id, node_id, node_id + 1, form, '_', tag, feat, token_id + 1, token, True]
             rows.append(row)
             node_id += 1
     return rows
@@ -130,7 +132,8 @@ def save_lattice(df, out_file_path):
         for sid, group in gb:
             # for row in group[['from_node', 'to_node', 'form', 'lemma', 'tag', 'feats', 'token_id']].itertuples():
             for row in group.iterrows():
-                lattice_line = '\t'.join([str(v) for v in row[1][['from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'tag', 'feats', 'token_id']].tolist()])
+                lattice_line = '\t'.join([str(v) for v in row[1][
+                    ['from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'tag', 'feats', 'token_id']].tolist()])
                 f.write(f'{lattice_line}\n')
             f.write('\n')
 
@@ -174,3 +177,20 @@ def save_token_classification_finetune_ner_json(df, out_file_path):
             j = {'words': words, 'ner': ner}
             json.dump(j, f)
             f.write('\n')
+
+
+def get_most_free_device():
+    i_max = -1
+    mem_free_max = 0
+
+    for i in range(torch.cuda.device_count()):
+        mem_total = torch.cuda.get_device_properties(i).total_memory
+        mem_reserved = torch.cuda.memory_reserved(i)
+        mem_allocated = torch.cuda.memory_allocated(i)
+        mem_free = mem_total - mem_reserved - mem_allocated
+
+        if mem_free > mem_free_max:
+            i_max = i
+            mem_free_max = mem_free
+
+    return i_max, mem_free_max
