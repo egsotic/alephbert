@@ -33,11 +33,6 @@ def main(config):
     tb_data_src = config['tb_data_src']
     tb_name = config['tb_name']
 
-    # paths
-    raw_root_path = Path(config['raw_root_path'])
-    preprocessed_root_path = Path(config['preprocessed_root_path'])
-    out_root_path = Path(config['out_root_path'])
-
     # bert
     bert_tokenizer_name = config['bert_tokenizer_name']
     bert_tokenizer_path = config['bert_tokenizer_path']
@@ -49,6 +44,12 @@ def main(config):
     # bert_epochs = config['bert_epochs']
     # bert_corpus_name = config['bert_corpus_name']
     # bert_model_size_type = config['bert_model_size_type']
+
+    # paths
+    raw_root_path = Path(config['raw_root_path'])
+    preprocessed_root_path = Path(config['preprocessed_root_path'])
+    preprocessed_root_path /= bert_tokenizer_name
+    out_root_path = Path(config['out_root_path'])
 
     # morph model
     md_strategry = config['md_strategry']

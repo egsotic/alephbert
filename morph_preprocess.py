@@ -1,11 +1,12 @@
 import argparse
 import json
 
+from transformers import AutoTokenizer
+
 from bclm import treebank as tb
 from constants import PAD, SOS, EOS, SEP
 from data.preprocess_form import *
 from data.preprocess_labels import *
-from hebrew_root_tokenizer import AlefBERTRootTokenizer
 
 
 def main(config):
@@ -17,10 +18,19 @@ def main(config):
     )
 
     # config
-    tokenizer_type = config['tokenizer_type']
-    transformer_type = config['transformer_type']
-    vocab_size = config['vocab_size']
-    corpus_name = config['corpus_name']
+    bert_tokenizer_name = config['bert_tokenizer_name']
+    bert_tokenizer_path = config['bert_tokenizer_path']
+
+    # tokenizer_type = config['tokenizer_type']
+    # transformer_type = config['transformer_type']
+    # vocab_size = config['vocab_size']
+    # corpus_name = config['corpus_name']
+
+    # tokenizer_version = f'{tokenizer_type}-{corpus_name}-{vocab_size}'
+    # if transformer_type == 'bert':
+    #     transformer_type = f'{transformer_type}-{tokenizer_version}'
+    # else:
+    #     tokenizer_version = transformer_type
 
     tb_root_path = Path(config['tb_root_path'])
     raw_root_path = Path(config['raw_root_path'])
@@ -28,13 +38,7 @@ def main(config):
     fasttext_lang = config['fasttext_lang']
     fasttext_model_path = Path(config['fasttext_model_path'])
 
-    tokenizer_version = f'{tokenizer_type}-{corpus_name}-{vocab_size}'
-    if transformer_type == 'bert':
-        transformer_type = f'{transformer_type}-{tokenizer_version}'
-    else:
-        tokenizer_version = transformer_type
-
-    preprocessed_root_path = preprocessed_root_path / transformer_type
+    preprocessed_root_path = preprocessed_root_path / bert_tokenizer_name
     preprocessed_root_path.mkdir(parents=True, exist_ok=False)
 
     if not raw_root_path.exists():
@@ -42,16 +46,7 @@ def main(config):
     else:
         raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path=None)
 
-    bert_root_path = Path(f'./experiments/tokenizers/{tokenizer_type}/{tokenizer_version}')
-    if tokenizer_type == 'wordpiece_roots':
-        bert_root_path = Path(f'./experiments/tokenizers/wordpiece/{tokenizer_version}')
-        bert_tokenizer = AlefBERTRootTokenizer(str(bert_root_path / 'vocab.txt'))
-    elif tokenizer_type == 'mBERT':
-        bert_tokenizer = BertTokenizerFast.from_pretrained('bert-base-multilingual-cased')
-    elif tokenizer_type == 'heBERT':
-        bert_tokenizer = BertTokenizerFast.from_pretrained(f'avichr/{tokenizer_type}')
-    else:
-        bert_tokenizer = BertTokenizerFast.from_pretrained(str(bert_root_path))
+    bert_tokenizer = AutoTokenizer.from_pretrained(bert_tokenizer_path)
 
     morph_data = get_morph_data(preprocessed_root_path, raw_partition)
     morph_form_char_data = get_form_char_data(preprocessed_root_path, morph_data, sep=SEP, eos=EOS)
