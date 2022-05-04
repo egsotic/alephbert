@@ -3,3 +3,4 @@ transformers
 datasets
 pandas
 fasttext==0.9.1
+nvsmi

@@ -2,6 +2,7 @@ import json
 from collections import Counter
 from itertools import zip_longest
 
+import nvsmi
 import pandas as pd
 import torch
 
@@ -180,17 +181,8 @@ def save_token_classification_finetune_ner_json(df, out_file_path):
 
 
 def get_most_free_device():
-    i_max = -1
-    mem_free_max = 0
+    gpu = max(nvsmi.get_gpus(), key=lambda g: g.mem_free)
 
-    for i in range(torch.cuda.device_count()):
-        mem_total = torch.cuda.get_device_properties(i).total_memory
-        mem_reserved = torch.cuda.memory_reserved(i)
-        mem_allocated = torch.cuda.memory_allocated(i)
-        mem_free = mem_total - mem_reserved - mem_allocated
+    gpu_index = int(gpu.id)
 
-        if mem_free > mem_free_max:
-            i_max = i
-            mem_free_max = mem_free
-
-    return i_max, mem_free_max
+    return gpu_index, gpu
