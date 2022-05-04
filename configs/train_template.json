@@ -1,0 +1,25 @@
+{
+    "name": "train_{model__0}_{tb_src_name}.json",
+    "template": {
+        "tb_schema": "UD",
+        "tb_data_src": "heb_tb1_tb2-{tb_src_name}",
+        "tb_name": "HTB",
+        "raw_root_path": "/home/nlp/egsotic/repo/alephbert/data/raw/heb_tb1_tb2/{tb_src_name}",
+        "preprocessed_root_path": "/home/nlp/egsotic/repo/alephbert/data/preprocessed/heb_tb1_tb2/{tb_src_name}/",
+        "out_root_path": "/home/nlp/egsotic/repo/alephbert/experiments",
+        "bert_tokenizer_name": "{model__0}",
+        "bert_tokenizer_path": "{model__1}",
+        "bert_model_name": "{model__0}",
+        "bert_model_path": "{model__1}",
+        "md_strategry": "morph-sequence",
+        "label_names": [
+            "tag",
+            "Gender",
+            "Number",
+            "Person",
+            "Tense"
+        ],
+        "device": "auto",
+        "epochs": 3
+    }
+}

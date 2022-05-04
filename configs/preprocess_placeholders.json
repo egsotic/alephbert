@@ -1,0 +1,21 @@
+{
+    "model": [
+        [
+            "AlephBERT",
+            "onlplab/alephbert-base"
+        ],
+        [
+            "mBERT",
+            "bert-base-multilingual-cased"
+        ],
+        [
+            "heBERT",
+            "avichr/heBERT"
+        ]
+    ],
+    "tb_src_name": [
+        "train_tb1",
+        "train_tb1+tb2",
+        "train_tb2"
+    ]
+}
