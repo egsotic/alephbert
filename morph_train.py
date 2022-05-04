@@ -156,9 +156,11 @@ def main(config):
         segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars,
                                    label_classifier_configs)
         md_model = MorphSequenceModel(xtoken_emb, segmentor)
-    else:
+    elif md_strategry == "segment-only":
         segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
         md_model = MorphSequenceModel(xtoken_emb, segmentor)
+    else:
+        raise KeyError(f'unknown md_strategry {md_strategry}')
 
     # device
     if device == 'auto':

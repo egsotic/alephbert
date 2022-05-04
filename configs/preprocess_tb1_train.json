@@ -1,9 +1,9 @@
 {
-  "bert_tokenizer_name": "AlephBERT",
-  "bert_tokenizer_path": "onlplab/alephbert-base",
-  "fasttext_lang": "he",
-  "fasttext_model_path": "/home/nlp/egsotic/repo/facebookresearch/fastText/models/cc.he.300.bin",
-  "tb_root_path": "/home/nlp/egsotic/data/heb_tb1_tb2/train_tb1",
-  "raw_root_path": "/home/nlp/egsotic/repo/alephbert/data/raw/heb_tb1_tb2/train_tb1",
-  "preprocessed_root_path": "/home/nlp/egsotic/repo/alephbert/data/preprocessed/heb_tb1_tb2/train_tb1"
+    "bert_tokenizer_name": "AlephBERT",
+    "bert_tokenizer_path": "onlplab/alephbert-base",
+    "fasttext_lang": "he",
+    "fasttext_model_path": "/home/nlp/egsotic/repo/facebookresearch/fastText/models/cc.he.300.bin",
+    "tb_root_path": "/home/nlp/egsotic/data/heb_tb1_tb2/train_tb1",
+    "raw_root_path": "/home/nlp/egsotic/repo/alephbert/data/raw/heb_tb1_tb2/train_tb1",
+    "preprocessed_root_path": "/home/nlp/egsotic/repo/alephbert/data/preprocessed/heb_tb1_tb2/train_tb1"
 }
