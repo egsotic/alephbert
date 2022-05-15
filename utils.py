@@ -5,6 +5,7 @@ from itertools import zip_longest
 import nvsmi
 import pandas as pd
 import torch
+from torch import nn as nn
 
 from bclm import treebank as tb
 
@@ -186,3 +187,13 @@ def get_most_free_device():
     gpu_index = int(gpu.id)
 
     return gpu_index, gpu
+
+
+def freeze_model(model: nn.Module):
+    for param in model.parameters():
+        param.requires_grad = False
+
+
+def unfreeze_model(model: nn.Module):
+    for param in model.parameters():
+        param.requires_grad = True
