@@ -63,6 +63,7 @@ def main(config):
     device = config['device']
     epochs = config['epochs']
     epochs_frozen = config['epochs_frozen']
+    eval_epochs = config['eval_epochs']
 
     # Data
     if tb_name == 'HTB':
@@ -222,20 +223,21 @@ def main(config):
                 teacher_forcing_ratio=teacher_forcing_ratio, optimizer=optimizer, max_grad_norm=max_grad_norm)
 
         # eval
-        md_model.eval()
-        with torch.no_grad():
-            dev_samples = process(md_model, dev_dataloader, label_names, char_vocab, label_vocab,
-                                  char_special_symbols,
-                                  label_pads, loss_fct, epoch, 'dev', print_every, device=device)
-            dev_samples.to_csv(out_epoch_dir_path / 'dev_samples.csv')
-            utils.print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], phase='dev', step=epoch,
-                                    fields=eval_fields)
-            test_samples = process(md_model, test_dataloader, label_names, char_vocab, label_vocab,
-                                   char_special_symbols,
-                                   label_pads, loss_fct, epoch, 'test', print_every, device=device)
-            test_samples.to_csv(out_epoch_dir_path / 'test_samples.csv')
-            utils.print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='test', step=epoch,
-                                    fields=eval_fields)
+        if epoch % eval_epochs == 0:
+            md_model.eval()
+            with torch.no_grad():
+                dev_samples = process(md_model, dev_dataloader, label_names, char_vocab, label_vocab,
+                                      char_special_symbols,
+                                      label_pads, loss_fct, epoch, 'dev', print_every, device=device)
+                dev_samples.to_csv(out_epoch_dir_path / 'dev_samples.csv')
+                utils.print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], phase='dev', step=epoch,
+                                        fields=eval_fields)
+                test_samples = process(md_model, test_dataloader, label_names, char_vocab, label_vocab,
+                                       char_special_symbols,
+                                       label_pads, loss_fct, epoch, 'test', print_every, device=device)
+                test_samples.to_csv(out_epoch_dir_path / 'test_samples.csv')
+                utils.print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='test', step=epoch,
+                                        fields=eval_fields)
 
             # if 'biose_layer0' in label_names:
             #     utils.save_ner(dev_samples, out_dir_path / 'morph_label_dev.bmes', 'biose_layer0')
@@ -337,45 +339,45 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
             optimizer.step()
             optimizer.zero_grad()
 
-        if print_every and (i + 1) % print_every == 0:
-            # To Lattice
-            for j in range(len(batch_sent_ids)):
-                sent_id = batch_sent_ids[j]
-                input_chars = batch_token_chars[j]
-                target_form_chars = batch_form_targets[j]
-                target_labels = [label_targets[j] for label_targets in batch_label_targets]
-                decoded_form_chars = batch_decoded_chars[j]
-                decoded_labels = [decoded_labels[j] for decoded_labels in batch_decoded_labels]
-                num_tokens = batch_num_tokens[j]
-                input_chars = input_chars.to('cpu')
-                target_form_chars = target_form_chars[:num_tokens].to('cpu')
-                decoded_form_chars = decoded_form_chars[:num_tokens].to('cpu')
-                target_labels = [labels[:num_tokens].to('cpu') for labels in target_labels]
-                decoded_labels = [labels[:num_tokens].to('cpu') for labels in decoded_labels]
-                input_tokens = utils.to_sent_tokens(input_chars, char_vocab['id2char'])
-                target_morph_segments = utils.to_token_morph_segments(target_form_chars,
-                                                                      char_vocab['id2char'],
-                                                                      char_special_symbols_cpu[EOS],
-                                                                      char_special_symbols_cpu[SEP])
-                decoded_morph_segments = utils.to_token_morph_segments(decoded_form_chars,
-                                                                       char_vocab['id2char'],
-                                                                       char_special_symbols_cpu[EOS],
-                                                                       char_special_symbols_cpu[SEP])
-                target_morph_labels = utils.to_token_morph_labels(target_labels, label_names,
-                                                                  label_vocab['id2labels'],
-                                                                  label_pads)
-                decoded_morph_labels = utils.to_token_morph_labels(decoded_labels, label_names,
-                                                                   label_vocab['id2labels'],
-                                                                   label_pads)
+        # To Lattice
+        for j in range(len(batch_sent_ids)):
+            sent_id = batch_sent_ids[j]
+            input_chars = batch_token_chars[j]
+            target_form_chars = batch_form_targets[j]
+            target_labels = [label_targets[j] for label_targets in batch_label_targets]
+            decoded_form_chars = batch_decoded_chars[j]
+            decoded_labels = [decoded_labels[j] for decoded_labels in batch_decoded_labels]
+            num_tokens = batch_num_tokens[j]
+            input_chars = input_chars.to('cpu')
+            target_form_chars = target_form_chars[:num_tokens].to('cpu')
+            decoded_form_chars = decoded_form_chars[:num_tokens].to('cpu')
+            target_labels = [labels[:num_tokens].to('cpu') for labels in target_labels]
+            decoded_labels = [labels[:num_tokens].to('cpu') for labels in decoded_labels]
+            input_tokens = utils.to_sent_tokens(input_chars, char_vocab['id2char'])
+            target_morph_segments = utils.to_token_morph_segments(target_form_chars,
+                                                                  char_vocab['id2char'],
+                                                                  char_special_symbols_cpu[EOS],
+                                                                  char_special_symbols_cpu[SEP])
+            decoded_morph_segments = utils.to_token_morph_segments(decoded_form_chars,
+                                                                   char_vocab['id2char'],
+                                                                   char_special_symbols_cpu[EOS],
+                                                                   char_special_symbols_cpu[SEP])
+            target_morph_labels = utils.to_token_morph_labels(target_labels, label_names,
+                                                              label_vocab['id2labels'],
+                                                              label_pads)
+            decoded_morph_labels = utils.to_token_morph_labels(decoded_labels, label_names,
+                                                               label_vocab['id2labels'],
+                                                               label_pads)
 
-                decoded_token_lattice_rows = (sent_id, input_tokens, decoded_morph_segments, decoded_morph_labels)
-                print_decoded_lattice_rows.append(decoded_token_lattice_rows)
-                print_target_forms.append(target_morph_segments)
-                print_target_labels.append(target_morph_labels)
-                print_decoded_forms.append(decoded_morph_segments)
-                print_decoded_labels.append(decoded_morph_labels)
+            decoded_token_lattice_rows = (sent_id, input_tokens, decoded_morph_segments, decoded_morph_labels)
+            print_decoded_lattice_rows.append(decoded_token_lattice_rows)
+            print_target_forms.append(target_morph_segments)
+            print_target_labels.append(target_morph_labels)
+            print_decoded_forms.append(decoded_morph_segments)
+            print_decoded_labels.append(decoded_morph_labels)
 
-            # Log Print Eval
+        # Log Print Eval
+        if print_every is not None and (i + 1) % print_every == 0:
             sent_id, input_tokens, decoded_segments, decoded_labels = print_decoded_lattice_rows[-1]
             target_segments = print_target_forms[-1]
             target_labels = print_target_labels[-1]

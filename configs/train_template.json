@@ -21,6 +21,7 @@
         ],
         "device": 0,
         "epochs": 15,
-        "epochs_frozen": 6
+        "epochs_frozen": 6,
+        "eval_epochs": 3
     }
 }
