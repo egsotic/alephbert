@@ -261,7 +261,7 @@ def main(config):
             #     print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path, ignore_cat=True))
 
         # save model
-        torch.save(md_model, out_epoch_dir_path / "md_model.pt")
+        torch.save(md_model.state_dict(), out_epoch_dir_path / "md_model.pt")
 
 
 def load_preprocessed_data_samples(data_root_path, partition, label_names, tb_schema) -> dict:
