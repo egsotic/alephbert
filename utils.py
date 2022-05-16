@@ -124,16 +124,19 @@ def print_eval_scores(decoded_df, truth_df, fields, phase, step):
 def get_wandb_log_eval_scores(decoded_df, truth_df, fields, phase, step):
     aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=fields)
 
+    metrics = {}
     for fs in mset_scores:
-        metrics = {}
+        aligned_score = aligned_scores[fs]
+        mset_score = mset_scores[fs]
+
         fs_str = ', '.join(fs)
 
-        metrics[f'{fs_str}_aligned_p'] = aligned_scores[0]
-        metrics[f'{fs_str}_aligned_r'] = aligned_scores[1]
-        metrics[f'{fs_str}_aligned_f1'] = aligned_scores[2]
-        metrics[f'{fs_str}_mset_p'] = mset_scores[0]
-        metrics[f'{fs_str}_mset_r'] = mset_scores[1]
-        metrics[f'{fs_str}_mset_f1'] = mset_scores[2]
+        metrics[f'{fs_str}_aligned_p'] = aligned_score[0]
+        metrics[f'{fs_str}_aligned_r'] = aligned_score[1]
+        metrics[f'{fs_str}_aligned_f1'] = aligned_score[2]
+        metrics[f'{fs_str}_mset_p'] = mset_score[0]
+        metrics[f'{fs_str}_mset_r'] = mset_score[1]
+        metrics[f'{fs_str}_mset_f1'] = mset_score[2]
 
     log_dict = {
         'epoch': step,
