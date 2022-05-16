@@ -230,14 +230,21 @@ def main(config):
                                       char_special_symbols,
                                       label_pads, loss_fct, epoch, 'dev', print_every, device=device)
                 dev_samples.to_csv(out_epoch_dir_path / 'dev_samples.csv')
-                utils.print_eval_scores(decoded_df=dev_samples, truth_df=partition['dev'], phase='dev', step=epoch,
-                                        fields=eval_fields)
+                log_dict = utils.get_wandb_log_eval_scores(decoded_df=dev_samples,
+                                                           truth_df=partition['dev'],
+                                                           phase='dev',
+                                                           step=epoch,
+                                                           fields=eval_fields)
+                wandb.log(log_dict)
                 test_samples = process(md_model, test_dataloader, label_names, char_vocab, label_vocab,
                                        char_special_symbols,
                                        label_pads, loss_fct, epoch, 'test', print_every, device=device)
                 test_samples.to_csv(out_epoch_dir_path / 'test_samples.csv')
-                utils.print_eval_scores(decoded_df=test_samples, truth_df=partition['test'], phase='test', step=epoch,
-                                        fields=eval_fields)
+                log_dict = utils.get_wandb_log_eval_scores(decoded_df=test_samples,
+                                                           truth_df=partition['test'],
+                                                           phase='test', step=epoch,
+                                                           fields=eval_fields)
+                wandb.log(log_dict)
 
             # if 'biose_layer0' in label_names:
             #     utils.save_ner(dev_samples, out_dir_path / 'morph_label_dev.bmes', 'biose_layer0')

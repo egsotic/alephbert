@@ -121,6 +121,32 @@ def print_eval_scores(decoded_df, truth_df, fields, phase, step):
         print(f'{phase} step {step} mset {fs} eval scores   : [P: {p}, R: {r}, F: {f}]')
 
 
+def get_wandb_log_eval_scores(decoded_df, truth_df, fields, phase, step):
+    aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=fields)
+
+    for fs in mset_scores:
+        metrics = {}
+        fs_str = ', '.join(fs)
+
+        metrics[f'{fs_str}_aligned_p'] = aligned_scores[0]
+        metrics[f'{fs_str}_aligned_r'] = aligned_scores[1]
+        metrics[f'{fs_str}_aligned_f1'] = aligned_scores[2]
+        metrics[f'{fs_str}_mset_p'] = mset_scores[0]
+        metrics[f'{fs_str}_mset_r'] = mset_scores[1]
+        metrics[f'{fs_str}_mset_f1'] = mset_scores[2]
+
+    log_dict = {
+        'epoch': step,
+        'phase': phase,
+        **{
+            f'{phase}/{k}': v
+            for k, v in metrics.items()
+        }
+    }
+
+    return log_dict
+
+
 # 0	1	גנן	גנן	NN	NN	gen=M|num=S	1
 # 1	2	גידל	גידל	VB	VB	gen=M|num=S|per=3|tense=PAST	2
 # 2	3	דגן	דגן	NN	NN	gen=M|num=S	3
