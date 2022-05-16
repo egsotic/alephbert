@@ -190,6 +190,7 @@ def main(config):
 
     # freeze bert
     if epochs_frozen > 0:
+        print("freezing bert")
         freeze_model(bert)
 
     parameters = list(filter(lambda p: p.requires_grad, md_model.parameters()))
@@ -209,7 +210,7 @@ def main(config):
         out_epoch_dir_path.mkdir(parents=True, exist_ok=True)
 
         # unfreeze
-        if epoch == epochs_frozen + 1:
+        if epochs_frozen > 0 and epoch == epochs_frozen + 1:
             print("unfreezing bert")
 
             unfreeze_model(bert)
