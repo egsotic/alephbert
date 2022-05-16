@@ -214,7 +214,7 @@ def main(config):
 
             unfreeze_model(bert)
             parameters = list(filter(lambda p: p.requires_grad, bert.parameters()))
-            optimizer.add_param_group(parameters)
+            optimizer.add_param_group({'params': parameters})
 
         # train
         md_model.train()
