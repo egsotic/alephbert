@@ -12,7 +12,7 @@ import tqdm
 import wandb as wandb
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
-from transformers import BertModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer
 
 import utils
 from bclm import treebank as tb
@@ -123,7 +123,7 @@ def main(config):
 
     # Language Model
     tokenizer = AutoTokenizer.from_pretrained(bert_tokenizer_path)
-    bert = BertModel.from_pretrained(bert_model_path)
+    bert = AutoModel.from_pretrained(bert_model_path)
 
     # Vocabs
     char_vectors, char_vocab = preprocess_labels.load_char_vocab(preprocessed_root_path)
