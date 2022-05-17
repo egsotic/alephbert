@@ -66,6 +66,7 @@ def main(config):
     eval_epochs = config['eval_epochs']
     model_checkpoint_path = None if 'model_checkpoint_path' not in config else config['model_checkpoint_path']
     checkpoint_epochs = None if 'checkpoint_epochs' not in config else config['checkpoint_epochs']
+    lr = 1e-3 if 'lr' not in config else config['lr']
 
     # Data
     if tb_name == 'HTB':
@@ -196,7 +197,6 @@ def main(config):
 
     # Optimizer
     max_grad_norm = 1.0
-    lr = 1e-3
 
     # freeze bert
     if epochs_frozen > 0:
