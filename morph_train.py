@@ -214,8 +214,8 @@ def main(config):
             print("unfreezing bert")
 
             unfreeze_model(bert)
-            parameters = list(filter(lambda p: p.requires_grad, bert.parameters()))
-            optimizer.add_param_group({'params': parameters})
+            parameters = list(filter(lambda p: p.requires_grad, md_model.parameters()))
+            optimizer = optim.AdamW(parameters, lr=lr)
 
         # train
         md_model.train()
