@@ -64,6 +64,8 @@ def main(config):
     epochs = config['epochs']
     epochs_frozen = config['epochs_frozen']
     eval_epochs = config['eval_epochs']
+    model_checkpoint_path = None if 'model_checkpoint_path' not in config else config['model_checkpoint_path']
+    checkpoint_epochs = None if 'checkpoint_epochs' not in config else config['checkpoint_epochs']
 
     # Data
     if tb_name == 'HTB':
@@ -168,6 +170,14 @@ def main(config):
     else:
         raise KeyError(f'unknown md_strategry {md_strategry}')
 
+    # load from checkpoint
+    if model_checkpoint_path:
+        print(f'loading model from checkpoint {model_checkpoint_path}')
+
+        with open(model_checkpoint_path, 'rb') as f:
+            state_dict = torch.load(f)
+        md_model.load_state_dict(state_dict)
+
     # device
     if device == 'auto':
         device, _ = utils.get_most_free_device()
@@ -202,9 +212,13 @@ def main(config):
     # don't print
     print_every = None
 
+    epoch_offset = 1
+    if checkpoint_epochs:
+        epoch_offset += checkpoint_epochs
+
     # Training epochs
     for i in trange(epochs, desc="Epoch"):
-        epoch = i + 1
+        epoch = epoch_offset + i
 
         out_epoch_dir_path = out_dir_path / str(epoch)
         out_epoch_dir_path.mkdir(parents=True, exist_ok=True)
