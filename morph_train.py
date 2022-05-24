@@ -224,7 +224,7 @@ def main(config):
         out_epoch_dir_path.mkdir(parents=True, exist_ok=True)
 
         # unfreeze
-        if epochs_frozen > 0 and epoch == epochs_frozen + 1:
+        if 0 < epochs_frozen == i:
             print("unfreezing bert")
 
             unfreeze_model(bert)
