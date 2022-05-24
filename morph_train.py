@@ -237,6 +237,9 @@ def main(config):
                 loss_fct, epoch, 'train', print_every, device=device,
                 teacher_forcing_ratio=teacher_forcing_ratio, optimizer=optimizer, max_grad_norm=max_grad_norm)
 
+        # save model
+        torch.save(md_model.state_dict(), out_epoch_dir_path / "md_model.pt")
+
         # eval
         if epoch % eval_epochs == 0:
             md_model.eval()
