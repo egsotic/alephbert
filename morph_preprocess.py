@@ -1,8 +1,6 @@
 import argparse
 import json
 
-from transformers import AutoTokenizer
-
 from bclm import treebank as tb
 from constants import PAD, SOS, EOS, SEP
 from data.preprocess_form import *
@@ -20,6 +18,10 @@ def main(config):
     # config
     bert_tokenizer_name = config['bert_tokenizer_name']
     bert_tokenizer_path = config['bert_tokenizer_path']
+    oracle_tokenizer = config.get('oracle_tokenizer', False)
+
+    if oracle_tokenizer:
+        bert_tokenizer_name = f'oracle_{bert_tokenizer_name}'
 
     # tokenizer_type = config['tokenizer_type']
     # transformer_type = config['transformer_type']
@@ -46,7 +48,12 @@ def main(config):
     else:
         raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path=None)
 
+    # tokenizer
     bert_tokenizer = AutoTokenizer.from_pretrained(bert_tokenizer_path)
+
+    # oracle
+    if oracle_tokenizer:
+        make_tokenizer_oracle(bert_tokenizer)
 
     morph_data = get_morph_data(preprocessed_root_path, raw_partition)
     morph_form_char_data = get_form_char_data(preprocessed_root_path, morph_data, sep=SEP, eos=EOS)

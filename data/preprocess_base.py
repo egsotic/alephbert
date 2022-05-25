@@ -1,10 +1,11 @@
 import logging
 from pathlib import Path
+from typing import List
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from transformers import BertTokenizerFast
+from transformers import BertTokenizerFast, AutoTokenizer
 
 import fasttext_emb as ft
 
@@ -30,14 +31,24 @@ def add_char_column(df: pd.DataFrame, field_name) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=list(df.columns) + ['char'])
 
 
-def _create_xtoken_df(morph_df: pd.DataFrame, xtokenizer: BertTokenizerFast, sos, eos) -> pd.DataFrame:
-    token_df = morph_df[['sent_id', 'token_id', 'token']].drop_duplicates()
+def _create_xtoken_df(morph_df: pd.DataFrame, xtokenizer: AutoTokenizer, sos, eos) -> pd.DataFrame:
+    columns = ['sent_id', 'token_id', 'token']
+
+    # tokenization extra data
+    get_tokenize_extra_data = lambda sent_id, token_id, t: {}
+    if 'form' in morph_df.columns and getattr(xtokenizer, 'is_oracle', False):
+        sent_seg_df = morph_df[columns + ['form']].drop_duplicates().groupby(['sent_id', 'token_id']).form.agg(list)
+        get_tokenize_extra_data = lambda sent_id, token_id, t: {'segments': sent_seg_df.loc[sent_id, token_id]}
+
+    token_df = morph_df[columns].drop_duplicates()
     sent_groups = sorted(token_df.groupby([token_df.sent_id]))
     num_sentences = len(sent_groups)
     tq = tqdm(total=num_sentences, desc="Sentence")
     data_rows = []
     for sent_id, sent_df in sent_groups:
-        xtokens = [(tid, t, xt) for tid, t in zip(sent_df.token_id, sent_df.token) for xt in xtokenizer.tokenize(t)]
+        xtokens = [(tid, t, xt)
+                   for tid, t in zip(sent_df.token_id, sent_df.token)
+                   for xt in xtokenizer.tokenize(t, **get_tokenize_extra_data(sent_id, tid, t))]
         sent_token_indices = [0] + [tid for tid, t, xt in xtokens] + [sent_df.token_id.max() + 1]
         sent_tokens = [sos] + [t for tid, t, xt in xtokens] + [eos]
         sent_xtokens = [xtokenizer.cls_token] + [xt for tid, t, xt in xtokens] + [xtokenizer.sep_token]
@@ -268,3 +279,19 @@ def load_xtoken_data(data_path: Path, partition: list) -> dict:
 def load_token_char_data(data_path: Path, partition: list) -> dict:
     data_samples = _load_token_char_data_samples(data_path, partition)
     return to_sub_token_seq(data_samples, ['char'])
+
+
+def tokenize_with_segments(tokenize, segments: List[str]):
+    return [t for seg in segments for t in tokenize(seg)]
+
+
+def make_tokenizer_oracle(tokenizer: AutoTokenizer):
+    def oracle_tokenize(t, segments=[], **kwargs):
+        if segments:
+            return tokenize_with_segments(tokenizer._tokenize, segments)
+
+        return tokenizer._tokenize(t)
+
+    tokenizer._tokenize = tokenizer.tokenize
+    tokenizer.tokenize = oracle_tokenize
+    tokenizer.is_oracle = True
