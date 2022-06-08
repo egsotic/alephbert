@@ -67,6 +67,8 @@ def main(config):
     model_checkpoint_path = None if 'model_checkpoint_path' not in config else config['model_checkpoint_path']
     checkpoint_epochs = None if 'checkpoint_epochs' not in config else config['checkpoint_epochs']
     lr = 1e-3 if 'lr' not in config else config['lr']
+    lr_scheduler_cls_name = config['lr_scheduler_cls_name']
+    lr_scheduler_params = config['lr_scheduler_params']
 
     # Data
     if tb_name == 'HTB':
@@ -199,13 +201,16 @@ def main(config):
     max_grad_norm = 1.0
 
     # freeze bert
-    if epochs_frozen > 0:
+    if epochs_frozen > 0 and (checkpoint_epochs is not None and epochs_frozen > checkpoint_epochs):
         print("freezing bert")
         freeze_model(bert)
 
     parameters = list(filter(lambda p: p.requires_grad, md_model.parameters()))
     # parameters = morph_tagger_model.parameters()
     optimizer = optim.AdamW(parameters, lr=lr)
+
+    lr_scheduler_cls = getattr(torch.optim.lr_scheduler, lr_scheduler_cls_name)
+    lr_scheduler = lr_scheduler_cls(optimizer, **lr_scheduler_params)
 
     loss_fct = nn.CrossEntropyLoss(ignore_index=0)
     teacher_forcing_ratio = 1.0
@@ -215,27 +220,36 @@ def main(config):
     epoch_offset = 1
     if checkpoint_epochs:
         epoch_offset += checkpoint_epochs
+        for _ in range(checkpoint_epochs):
+            lr_scheduler.step()
 
     # Training epochs
-    for i in trange(epochs, desc="Epoch"):
+    for i in trange(epochs - checkpoint_epochs, desc="Epoch"):
         epoch = epoch_offset + i
+        print('epoch', epoch, 'lr', lr_scheduler.get_last_lr())
 
         out_epoch_dir_path = out_dir_path / str(epoch)
         out_epoch_dir_path.mkdir(parents=True, exist_ok=True)
 
         # unfreeze
-        if 0 < epochs_frozen == i:
+        if 0 < epochs_frozen == epoch - 1:
             print("unfreezing bert")
 
             unfreeze_model(bert)
+
+            # recreate optimizer and lr_scheduler with new parameters
             parameters = list(filter(lambda p: p.requires_grad, md_model.parameters()))
             optimizer = optim.AdamW(parameters, lr=lr)
+            lr_scheduler = lr_scheduler_cls(optimizer, **lr_scheduler_params)
+            for _ in range(epochs_frozen):
+                lr_scheduler.step()
 
         # train
         md_model.train()
         process(md_model, train_dataloader, label_names, char_vocab, label_vocab, char_special_symbols, label_pads,
                 loss_fct, epoch, 'train', print_every, device=device,
                 teacher_forcing_ratio=teacher_forcing_ratio, optimizer=optimizer, max_grad_norm=max_grad_norm)
+        lr_scheduler.step()
 
         # save model
         torch.save(md_model.state_dict(), out_epoch_dir_path / "md_model.pt")
