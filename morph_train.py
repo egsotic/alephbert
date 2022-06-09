@@ -58,6 +58,7 @@ def main(config):
     # morph model
     md_strategry = config['md_strategry']
     label_names = config['label_names']
+    use_crf_for_ner = config.get('use_crf_for_ner', False)
 
     # train
     device = config['device']
@@ -70,7 +71,9 @@ def main(config):
     lr_scheduler_cls_name = config['lr_scheduler_cls_name']
     lr_scheduler_params = config['lr_scheduler_params']
 
-    # Data
+    # data
+    ner_feat_name = config.get('ner_feat_name', 'ner')
+
     if tb_name == 'HTB':
         partition = tb.ud(raw_root_path, tb_name)
     elif tb_name == 'hebtb':
@@ -155,8 +158,8 @@ def main(config):
     label_classifier_configs = []
     for name in label_names:
         label_classifier_config = {'id2label': label_vocab['id2labels'][name]}
-        # if name == 'biose_layer0':
-        #     config['crf_trans_type'] = 'BIOSE'
+        if use_crf_for_ner and name == ner_feat_name:
+            label_classifier_config['crf_trans_type'] = 'BIOSE'
         label_classifier_configs.append(label_classifier_config)
 
     if md_strategry == "morph-pipeline":
