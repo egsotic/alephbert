@@ -64,9 +64,9 @@ def main(config):
     epochs = config['epochs']
     epochs_frozen = config['epochs_frozen']
     eval_epochs = config['eval_epochs']
-    model_checkpoint_path = None if 'model_checkpoint_path' not in config else config['model_checkpoint_path']
-    checkpoint_epochs = None if 'checkpoint_epochs' not in config else config['checkpoint_epochs']
-    lr = 1e-3 if 'lr' not in config else config['lr']
+    model_checkpoint_path = config.get('model_checkpoint_path', None)
+    checkpoint_epochs = config.get('checkpoint_epochs', 0)
+    lr = config.get('lr', 1e-3)
     lr_scheduler_cls_name = config['lr_scheduler_cls_name']
     lr_scheduler_params = config['lr_scheduler_params']
 
