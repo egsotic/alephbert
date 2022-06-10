@@ -197,7 +197,7 @@ def main(config):
     eval_fields = ['form']
     if 'tag' in label_names:
         eval_fields.append('tag')
-    if len([name for name in label_names if name not in ['biose_layer0', 'tag']]) > 0:
+    if len([name for name in label_names if name not in [ner_feat_name, 'tag']]) > 0:
         eval_fields.append('feats')
 
     # Optimizer
