@@ -55,6 +55,12 @@ def main(config):
     preprocessed_root_path /= bert_tokenizer_name
     out_root_path = Path(config['out_root_path'])
 
+    # control
+    do_train = config.get('do_train', False)
+    predict_train = config.get('predict_train', False)
+    do_eval = config.get('do_eval', False)
+    do_test = config.get('do_test', False)
+
     # morph model
     md_strategry = config['md_strategry']
     label_names = config['label_names']
@@ -188,9 +194,10 @@ def main(config):
     if device == 'auto':
         device, _ = utils.get_most_free_device()
 
+    char_special_symbols = {SOS: char_sos, EOS: char_eos,
+                            SEP: char_sep, PAD: char_pad}
     if device is not None:
-        char_special_symbols = {SOS: char_sos.to(device), EOS: char_eos.to(device),
-                                SEP: char_sep.to(device), PAD: char_pad.to(device)}
+        char_special_symbols = {k: v.to(device) for k, v in char_special_symbols.items()}
         md_model.to(device)
     print(md_model)
 
@@ -226,73 +233,119 @@ def main(config):
         for _ in range(checkpoint_epochs):
             lr_scheduler.step()
 
-    # Training epochs
-    for i in trange(epochs - checkpoint_epochs, desc="Epoch"):
-        epoch = epoch_offset + i
-        print('epoch', epoch, 'lr', lr_scheduler.get_last_lr())
+    if do_train:
+        # Training epochs
+        for i in trange(epochs - checkpoint_epochs, desc="Epoch"):
+            epoch = epoch_offset + i
+            print('epoch', epoch, 'lr', lr_scheduler.get_last_lr())
 
+            out_epoch_dir_path = out_dir_path / str(epoch)
+            out_epoch_dir_path.mkdir(parents=True, exist_ok=True)
+
+            # unfreeze
+            if 0 < epochs_frozen == epoch - 1:
+                print("unfreezing bert")
+
+                unfreeze_model(bert)
+
+                # recreate optimizer and lr_scheduler with new parameters
+                parameters = list(filter(lambda p: p.requires_grad, md_model.parameters()))
+                optimizer = optim.AdamW(parameters, lr=lr)
+                lr_scheduler = lr_scheduler_cls(optimizer, **lr_scheduler_params)
+                for _ in range(epochs_frozen):
+                    lr_scheduler.step()
+
+            # train
+            md_model.train()
+            process(md_model, train_dataloader, label_names, char_vocab, label_vocab, char_special_symbols, label_pads,
+                    loss_fct, epoch, 'train', print_every, device=device,
+                    teacher_forcing_ratio=teacher_forcing_ratio, optimizer=optimizer, max_grad_norm=max_grad_norm)
+            lr_scheduler.step()
+
+            # save model
+            torch.save(md_model.state_dict(), out_epoch_dir_path / "md_model.pt")
+
+            # eval
+            if epoch % eval_epochs == 0:
+                run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
+                         label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader)
+                run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
+                         label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader)
+
+                # if 'biose_layer0' in label_names:
+                #     utils.save_ner(dev_samples, out_dir_path / 'morph_label_dev.bmes', 'biose_layer0')
+                #     dev_gold_file_path = root_path / Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_dev.bmes')
+                #     dev_pred_file_path = out_dir_path / 'morph_label_dev.bmes'
+                #     print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path))
+                #     print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path, ignore_cat=True))
+                #
+                #     utils.save_ner(test_samples, out_dir_path / 'morph_label_test.bmes', 'biose_layer0')
+                #     test_gold_file_path = root_path / Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_test.bmes')
+                #     test_pred_file_path = out_dir_path / 'morph_label_test.bmes'
+                #     print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path))
+                #     print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path, ignore_cat=True))
+
+    else:
+        epoch = epochs
         out_epoch_dir_path = out_dir_path / str(epoch)
-        out_epoch_dir_path.mkdir(parents=True, exist_ok=True)
 
-        # unfreeze
-        if 0 < epochs_frozen == epoch - 1:
-            print("unfreezing bert")
+        if predict_train:
+            run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
+                           label_vocab,
+                           loss_fct, md_model, out_epoch_dir_path, partition, print_every, train_dataloader)
+        if do_eval:
+            run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
+                     loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader)
+        if do_test:
+            run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
+                     label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader)
 
-            unfreeze_model(bert)
 
-            # recreate optimizer and lr_scheduler with new parameters
-            parameters = list(filter(lambda p: p.requires_grad, md_model.parameters()))
-            optimizer = optim.AdamW(parameters, lr=lr)
-            lr_scheduler = lr_scheduler_cls(optimizer, **lr_scheduler_params)
-            for _ in range(epochs_frozen):
-                lr_scheduler.step()
+def run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
+                   loss_fct, md_model, out_epoch_dir_path, partition, print_every, train_dataloader):
+    md_model.eval()
+    with torch.no_grad():
+        train_samples = process(md_model, train_dataloader, label_names, char_vocab, label_vocab,
+                                char_special_symbols,
+                                label_pads, loss_fct, epoch, 'eval_train', print_every, device=device)
+        train_samples.to_csv(out_epoch_dir_path / 'train_samples.csv')
+        log_dict = utils.get_wandb_log_eval_scores(decoded_df=train_samples,
+                                                   truth_df=partition['train'],
+                                                   phase='eval_train',
+                                                   step=epoch,
+                                                   fields=eval_fields)
+        wandb.log(log_dict)
 
-        # train
-        md_model.train()
-        process(md_model, train_dataloader, label_names, char_vocab, label_vocab, char_special_symbols, label_pads,
-                loss_fct, epoch, 'train', print_every, device=device,
-                teacher_forcing_ratio=teacher_forcing_ratio, optimizer=optimizer, max_grad_norm=max_grad_norm)
-        lr_scheduler.step()
 
-        # save model
-        torch.save(md_model.state_dict(), out_epoch_dir_path / "md_model.pt")
+def run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
+             loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader):
+    md_model.eval()
+    with torch.no_grad():
+        dev_samples = process(md_model, dev_dataloader, label_names, char_vocab, label_vocab,
+                              char_special_symbols,
+                              label_pads, loss_fct, epoch, 'dev', print_every, device=device)
+        dev_samples.to_csv(out_epoch_dir_path / 'dev_samples.csv')
+        log_dict = utils.get_wandb_log_eval_scores(decoded_df=dev_samples,
+                                                   truth_df=partition['dev'],
+                                                   phase='dev',
+                                                   step=epoch,
+                                                   fields=eval_fields)
+        wandb.log(log_dict)
 
-        # eval
-        if epoch % eval_epochs == 0:
-            md_model.eval()
-            with torch.no_grad():
-                dev_samples = process(md_model, dev_dataloader, label_names, char_vocab, label_vocab,
-                                      char_special_symbols,
-                                      label_pads, loss_fct, epoch, 'dev', print_every, device=device)
-                dev_samples.to_csv(out_epoch_dir_path / 'dev_samples.csv')
-                log_dict = utils.get_wandb_log_eval_scores(decoded_df=dev_samples,
-                                                           truth_df=partition['dev'],
-                                                           phase='dev',
-                                                           step=epoch,
-                                                           fields=eval_fields)
-                wandb.log(log_dict)
-                test_samples = process(md_model, test_dataloader, label_names, char_vocab, label_vocab,
-                                       char_special_symbols,
-                                       label_pads, loss_fct, epoch, 'test', print_every, device=device)
-                test_samples.to_csv(out_epoch_dir_path / 'test_samples.csv')
-                log_dict = utils.get_wandb_log_eval_scores(decoded_df=test_samples,
-                                                           truth_df=partition['test'],
-                                                           phase='test', step=epoch,
-                                                           fields=eval_fields)
-                wandb.log(log_dict)
 
-            # if 'biose_layer0' in label_names:
-            #     utils.save_ner(dev_samples, out_dir_path / 'morph_label_dev.bmes', 'biose_layer0')
-            #     dev_gold_file_path = root_path / Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_dev.bmes')
-            #     dev_pred_file_path = out_dir_path / 'morph_label_dev.bmes'
-            #     print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path))
-            #     print(ne_evaluate_mentions.evaluate_files(dev_gold_file_path, dev_pred_file_path, ignore_cat=True))
-            #
-            #     utils.save_ner(test_samples, out_dir_path / 'morph_label_test.bmes', 'biose_layer0')
-            #     test_gold_file_path = root_path / Path(f'data/raw/{tb_data_src}/{tb_name}/gold/morph_gold_test.bmes')
-            #     test_pred_file_path = out_dir_path / 'morph_label_test.bmes'
-            #     print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path))
-            #     print(ne_evaluate_mentions.evaluate_files(test_gold_file_path, test_pred_file_path, ignore_cat=True))
+def run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
+             loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader):
+    md_model.eval()
+    with torch.no_grad():
+        test_samples = process(md_model, test_dataloader, label_names, char_vocab, label_vocab,
+                               char_special_symbols,
+                               label_pads, loss_fct, epoch, 'test', print_every, device=device)
+        test_samples.to_csv(out_epoch_dir_path / 'test_samples.csv')
+        log_dict = utils.get_wandb_log_eval_scores(decoded_df=test_samples,
+                                                   truth_df=partition['test'],
+                                                   phase='test', step=epoch,
+                                                   fields=eval_fields)
+        wandb.log(log_dict)
 
 
 def load_preprocessed_data_samples(data_root_path, partition, label_names, tb_schema) -> dict:
