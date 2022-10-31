@@ -77,6 +77,9 @@ def main(config):
     lr_scheduler_cls_name = config['lr_scheduler_cls_name']
     lr_scheduler_params = config['lr_scheduler_params']
 
+    mask_extra_tokens_label = config.get('mask_extra_tokens_label', None)
+    mask_extra_tokens_value = config.get('mask_extra_tokens_value', None)
+
     # data
     ner_feat_name = config.get('ner_feat_name', 'ner')
 
@@ -258,8 +261,10 @@ def main(config):
             # train
             md_model.train()
             process(md_model, train_dataloader, label_names, char_vocab, label_vocab, char_special_symbols, label_pads,
-                    loss_fct, epoch, 'train', print_every, device=device,
-                    teacher_forcing_ratio=teacher_forcing_ratio, optimizer=optimizer, max_grad_norm=max_grad_norm)
+                    loss_fct, epoch, 'train', print_every, teacher_forcing_ratio=teacher_forcing_ratio, device=device,
+                    optimizer=optimizer, max_grad_norm=max_grad_norm,
+                    mask_extra_tokens_label=mask_extra_tokens_label,
+                    mask_extra_tokens_value=mask_extra_tokens_value)
             lr_scheduler.step()
 
             # save model
@@ -305,8 +310,7 @@ def run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields,
                    loss_fct, md_model, out_epoch_dir_path, partition, print_every, train_dataloader):
     md_model.eval()
     with torch.no_grad():
-        train_samples = process(md_model, train_dataloader, label_names, char_vocab, label_vocab,
-                                char_special_symbols,
+        train_samples = process(md_model, train_dataloader, label_names, char_vocab, label_vocab, char_special_symbols,
                                 label_pads, loss_fct, epoch, 'eval_train', print_every, device=device)
         train_samples.to_csv(out_epoch_dir_path / 'train_samples.csv')
         log_dict = utils.get_wandb_log_eval_scores(decoded_df=train_samples,
@@ -321,8 +325,7 @@ def run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label
              loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader):
     md_model.eval()
     with torch.no_grad():
-        dev_samples = process(md_model, dev_dataloader, label_names, char_vocab, label_vocab,
-                              char_special_symbols,
+        dev_samples = process(md_model, dev_dataloader, label_names, char_vocab, label_vocab, char_special_symbols,
                               label_pads, loss_fct, epoch, 'dev', print_every, device=device)
         dev_samples.to_csv(out_epoch_dir_path / 'dev_samples.csv')
         log_dict = utils.get_wandb_log_eval_scores(decoded_df=dev_samples,
@@ -337,8 +340,7 @@ def run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label
              loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader):
     md_model.eval()
     with torch.no_grad():
-        test_samples = process(md_model, test_dataloader, label_names, char_vocab, label_vocab,
-                               char_special_symbols,
+        test_samples = process(md_model, test_dataloader, label_names, char_vocab, label_vocab, char_special_symbols,
                                label_pads, loss_fct, epoch, 'test', print_every, device=device)
         test_samples.to_csv(out_epoch_dir_path / 'test_samples.csv')
         log_dict = utils.get_wandb_log_eval_scores(decoded_df=test_samples,
@@ -367,7 +369,8 @@ def load_preprocessed_data_samples(data_root_path, partition, label_names, tb_sc
 # Training and evaluation routine
 def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str], char_vocab: Dict, label_vocab: Dict,
             char_special_symbols: Dict, label_pads, criterion: nn.CrossEntropyLoss, epoch, phase, print_every,
-            teacher_forcing_ratio=0.0, device='cpu', optimizer: optim.AdamW = None, max_grad_norm=None):
+            teacher_forcing_ratio=0.0, device='cpu', optimizer: optim.AdamW = None, max_grad_norm=None,
+            mask_extra_tokens_label=None, mask_extra_tokens_value=None):
     print_form_loss, total_form_loss = 0, 0
     print_label_losses, total_label_losses = [0 for _ in range(len(label_names))], [0 for _ in range(len(label_names))]
     print_target_forms, total_target_forms = [], []
@@ -377,6 +380,10 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
     print_decoded_lattice_rows, total_decoded_lattice_rows = [], []
 
     char_special_symbols_cpu = {k: v.to('cpu') for k, v in char_special_symbols.items()}
+
+    if mask_extra_tokens_label:
+        mask_extra_tokens_target_label = label_vocab['labels2id'][mask_extra_tokens_label][mask_extra_tokens_value]
+        mask_extra_tokens_label_idx = label_names.index(mask_extra_tokens_label)
 
     for i, batch in tqdm.tqdm(enumerate(data), desc="batch"):
         batch = tuple(t.to(device) for t in batch)
@@ -390,13 +397,26 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
             target_token_labels = sent_labels[:, :, 2:]
             max_num_labels = target_token_labels.shape[1]
             use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
+
+            form_targets = target_token_form_chars[:num_tokens]
+            label_targets = target_token_labels[:num_tokens]
+
+            # mask out labels of extra tokens (used to get for better context)
+            if mask_extra_tokens_label:
+                mask_extra_tokens = (target_token_labels[:num_tokens, 0,
+                                     mask_extra_tokens_label_idx] != mask_extra_tokens_target_label)
+
+                form_targets *= mask_extra_tokens.view(-1, 1)
+                label_targets *= mask_extra_tokens.view(-1, 1, 1)
+
             form_scores, _, label_scores = model(sent_xtoken, input_token_chars, char_special_symbols, num_tokens,
                                                  max_form_len, max_num_labels,
                                                  target_token_form_chars if use_teacher_forcing else None)
+
             batch_form_scores.append(form_scores)
             batch_label_scores.append(label_scores)
-            batch_form_targets.append(target_token_form_chars[:num_tokens])
-            batch_label_targets.append(target_token_labels[:num_tokens])
+            batch_form_targets.append(form_targets)
+            batch_label_targets.append(label_targets)
             batch_token_chars.append(input_token_chars[:num_tokens])
             batch_sent_ids.append(sent_form_chars[:, :, 0].unique().item())
             batch_num_tokens.append(num_tokens)

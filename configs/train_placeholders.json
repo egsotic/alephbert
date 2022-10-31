@@ -1,21 +1,27 @@
 {
     "model": [
         [
-            "AlephBERT",
-            "onlplab/alephbert-base"
+          "AlephBERT",
+          "onlplab/alephbert-base"
         ],
-        [
-            "mBERT",
-            "bert-base-multilingual-cased"
-        ],
-        [
-            "heBERT",
-            "avichr/heBERT"
-        ]
+      [
+        "mBERT",
+        "bert-base-multilingual-cased"
+      ],
+      [
+        "heBERT",
+        "avichr/heBERT"
+      ],
+      [
+        "AlephBERTGimel",
+        "/home/nlp/egsotic/data/AlephBERTGimel"
+      ],
+      [
+        "TavBERT",
+        "tau/tavbert-he"
+      ]
     ],
     "tb_src_name": [
-        "train_tb1",
-        "train_tb1+tb2",
-        "train_tb2"
+      "train_tb1_ner"
     ]
 }
