@@ -208,8 +208,13 @@ def main(config):
     eval_fields = ['form']
     if 'tag' in label_names:
         eval_fields.append('tag')
-    if len([name for name in label_names if name not in [ner_feat_name, 'tag']]) > 0:
+    # feats (e.g. Gender, Number etc.)
+    keep_feats = None
+    additional_fields = [name for name in label_names if name not in [ner_feat_name, 'tag']]
+
+    if len(additional_fields) > 0:
         eval_fields.append('feats')
+        keep_feats = additional_fields[:]
 
     # Optimizer
     max_grad_norm = 1.0
@@ -314,7 +319,7 @@ def main(config):
 
 def run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
                    loss_fct, md_model, out_epoch_dir_path, partition, print_every, train_dataloader,
-                   fix_extra_tokens=False):
+                   fix_extra_tokens=False, keep_feats=None):
     md_model.eval()
     with torch.no_grad():
         train_samples = process(md_model, train_dataloader, label_names, char_vocab, label_vocab, char_special_symbols,
@@ -325,12 +330,14 @@ def run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields,
                                                    phase='eval_train',
                                                    step=epoch,
                                                    fields=eval_fields,
-                                                   fix_extra_tokens=fix_extra_tokens)
+                                                   fix_extra_tokens=fix_extra_tokens,
+                                                   keep_feats=keep_feats)
         wandb.log(log_dict)
 
 
 def run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
-             loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader, fix_extra_tokens=False):
+             loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader,
+             fix_extra_tokens=False, keep_feats=None):
     md_model.eval()
     with torch.no_grad():
         dev_samples = process(md_model, dev_dataloader, label_names, char_vocab, label_vocab, char_special_symbols,
@@ -341,12 +348,14 @@ def run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label
                                                    phase='dev',
                                                    step=epoch,
                                                    fields=eval_fields,
-                                                   fix_extra_tokens=fix_extra_tokens)
+                                                   fix_extra_tokens=fix_extra_tokens,
+                                                   keep_feats=keep_feats)
         wandb.log(log_dict)
 
 
 def run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
-             loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader, fix_extra_tokens=False):
+             loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader,
+             fix_extra_tokens=False, keep_feats=None):
     md_model.eval()
     with torch.no_grad():
         test_samples = process(md_model, test_dataloader, label_names, char_vocab, label_vocab, char_special_symbols,
@@ -356,7 +365,8 @@ def run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label
                                                    truth_df=partition['test'],
                                                    phase='test', step=epoch,
                                                    fields=eval_fields,
-                                                   fix_extra_tokens=fix_extra_tokens)
+                                                   fix_extra_tokens=fix_extra_tokens,
+                                                   keep_feats=keep_feats)
         wandb.log(log_dict)
 
 

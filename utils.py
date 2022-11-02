@@ -1,6 +1,7 @@
 import json
 from collections import Counter
 from itertools import zip_longest
+from typing import List, Set
 
 import numpy as np
 import nvsmi
@@ -148,11 +149,29 @@ def fix_extra_tokens_dfs(gold_df, pred_df):
     return gold_fix_df, pred_fix_df
 
 
-def get_wandb_log_eval_scores(decoded_df, truth_df, fields, phase, step, fix_extra_tokens: bool = False):
-    if fix_extra_tokens:
-        fixed_truth_df, fixed_decoded_df = fix_extra_tokens_dfs(truth_df, decoded_df)
+def filter_feats_str(feats_str: str, keep_feats: Set[str]):
+    feats_sep = '|'
+    feats = feats_str.split(feats_sep)
+    filtered_feats = [f for f in feats if f.split('=', maxsplit=1)[0] in keep_feats]
 
-    aligned_scores, mset_scores = tb.morph_eval(pred_df=fixed_decoded_df, gold_df=fixed_truth_df, fields=fields)
+    return feats_sep.join(filtered_feats)
+
+
+def filter_feats_df(df: pd.DataFrame, keep_feats: List[str]):
+    df.feats = df.feats.apply(filter_feats_str, args=(set(keep_feats),))
+
+
+def get_wandb_log_eval_scores(decoded_df, truth_df, fields, phase, step,
+                              fix_extra_tokens: bool = False, keep_feats: List[str] = None):
+    if fix_extra_tokens:
+        truth_df, decoded_df = fix_extra_tokens_dfs(truth_df, decoded_df)
+
+    # filter only relevant features (df.feats)
+    if keep_feats:
+        filter_feats_df(truth_df, keep_feats)
+        filter_feats_df(decoded_df, keep_feats)
+
+    aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=fields)
 
     metrics = {}
     for fs in mset_scores:
