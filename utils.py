@@ -2,6 +2,7 @@ import json
 from collections import Counter
 from itertools import zip_longest
 
+import numpy as np
 import nvsmi
 import pandas as pd
 import torch
@@ -121,8 +122,37 @@ def print_eval_scores(decoded_df, truth_df, fields, phase, step):
         print(f'{phase} step {step} mset {fs} eval scores   : [P: {p}, R: {r}, F: {f}]')
 
 
-def get_wandb_log_eval_scores(decoded_df, truth_df, fields, phase, step):
-    aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=fields)
+def fix_extra_tokens_sent(sent_df):
+    sent_df['morph_id'] = list(range(1, len(sent_df) + 1))
+    token_id = np.array(sent_df['token_id'])
+    sent_df['token_id'] = np.cumsum(np.concatenate(([1], np.clip((token_id[1:] - token_id[:-1]), 0, 1))))
+
+    return sent_df
+
+
+def fix_extra_tokens_dfs(gold_df, pred_df):
+    gold_df = gold_df.set_index(['sent_id', 'token_id'])
+    pred_fix_df = pred_df.set_index(['sent_id', 'token_id'])
+
+    extra_tokens_index = gold_df.loc[(gold_df.tag == '_') & (gold_df.lemma == '_')].index
+
+    gold_fix_df = gold_df.loc[gold_df.index.difference(extra_tokens_index)]
+    pred_fix_df = pred_fix_df.loc[pred_fix_df.index.difference(extra_tokens_index)]
+
+    gold_fix_df = gold_fix_df.reset_index()
+    pred_fix_df = pred_fix_df.reset_index()
+
+    gold_fix_df = gold_fix_df.groupby('sent_id').apply(fix_extra_tokens_sent)
+    pred_fix_df = pred_fix_df.groupby('sent_id').apply(fix_extra_tokens_sent)
+
+    return gold_fix_df, pred_fix_df
+
+
+def get_wandb_log_eval_scores(decoded_df, truth_df, fields, phase, step, fix_extra_tokens: bool = False):
+    if fix_extra_tokens:
+        fixed_truth_df, fixed_decoded_df = fix_extra_tokens_dfs(truth_df, decoded_df)
+
+    aligned_scores, mset_scores = tb.morph_eval(pred_df=fixed_decoded_df, gold_df=fixed_truth_df, fields=fields)
 
     metrics = {}
     for fs in mset_scores:
