@@ -44,18 +44,17 @@ class BertTokenEmbeddingModel(nn.Module):
     def embedding_dim(self):
         return self.bert.config.hidden_size
 
-    def forward(self, token_seq):
-        mask = torch.ne(token_seq[:, :, 1], self.bert_tokenizer.pad_token_id)
-        bert_output = self.bert(token_seq[:, :, 1], attention_mask=mask)
-        bert_emb_tokens = bert_output.last_hidden_state
+    def forward(self, batch_token_seq):
+        batch_mask = torch.ne(batch_token_seq[:, :, 1], self.bert_tokenizer.pad_token_id)
+        batch_bert_output = self.bert(batch_token_seq[:, :, 1], attention_mask=batch_mask)
+        batch_bert_emb_tokens = batch_bert_output.last_hidden_state
         emb_tokens = []
-        for i in range(len(token_seq)):
-            # # groupby token_id
-            # mask = torch.ne(input_xtokens[i, :, 1], 0)
-            idxs, vals = torch.unique_consecutive(token_seq[i, :, 0][mask[i]], return_counts=True)
-            token_emb_xtoken_split = torch.split_with_sizes(bert_emb_tokens[i][mask[i]], tuple(vals))
-            # token_xcontext = {k.item(): v for k, v in zip(idxs, [torch.mean(t, dim=0) for t in token_emb_xtokens])}
+
+        for i in range(len(batch_token_seq)):
+            idxs, vals = torch.unique_consecutive(batch_token_seq[i, :, 0][batch_mask[i]], return_counts=True)
+            token_emb_xtoken_split = torch.split_with_sizes(batch_bert_emb_tokens[i][batch_mask[i]], tuple(vals))
             emb_tokens.append(torch.stack([torch.mean(t, dim=0) for t in token_emb_xtoken_split], dim=0))
+
         return emb_tokens
 
 
@@ -226,9 +225,27 @@ class MorphSequenceModel(nn.Module):
     def embedding_dim(self):
         return self.xtoken_emb.embedding_dim
 
+    def batch_forward(self, batch_xtoken_seq, batch_char_seq, batch_special_symbols, batch_num_tokens,
+                      batch_max_form_len, batch_max_num_labels, batch_target_chars=None):
+        batch_xtoken_seq = torch.stack(batch_xtoken_seq, dim=0)
+        batch_token_ctx = self.xtoken_emb(batch_xtoken_seq)
+
+        for token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels, target_chars in zip(
+                batch_token_ctx, batch_char_seq, batch_special_symbols, batch_num_tokens,
+                batch_max_form_len, batch_max_num_labels, batch_target_chars):
+            yield self._forward(token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
+                                target_chars)
+
     def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
                 target_chars=None):
         token_ctx = self.xtoken_emb(xtoken_seq.unsqueeze(dim=0))[0]
+
+        return self._forward(token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
+                             target_chars)
+
+    def _forward(self, token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
+                 target_chars=None):
+
         out_char_scores, out_char_states = [], []
         out_label_scores = []
         for _ in self.segment_decoder.classifiers:
@@ -275,7 +292,7 @@ class MorphPipelineModel(MorphSequenceModel):
                                batch_first=False,
                                dropout=dropout)
         self.seg_dropout = nn.Dropout(seg_dropout)
-        self.classifiers = nn.ModuleList([LabelClassifier(hidden_size*2, config) for config in labels_configs])
+        self.classifiers = nn.ModuleList([LabelClassifier(hidden_size * 2, config) for config in labels_configs])
 
     def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
                 target_chars=None):

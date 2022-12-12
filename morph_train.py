@@ -132,10 +132,8 @@ def main(config):
             file_path = data_samples_file_paths[part]
             logging.info(f'Saving {tb_schema} {out_morph_type} tensor dataset to {file_path}')
             torch.save(datasets[part], file_path)
-    # datasets['train'] = TensorDataset(*[t[:100] for t in datasets['train'].tensors])
-    # datasets['dev'] = TensorDataset(*[t[:100] for t in datasets['dev'].tensors])
-    # datasets['test'] = TensorDataset(*[t[:100] for t in datasets['test'].tensors])
-    train_dataloader = DataLoader(datasets['train'], batch_size=1, shuffle=False)
+
+    train_dataloader = DataLoader(datasets['train'], batch_size=32, shuffle=True)
     dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
     test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
@@ -408,9 +406,27 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
 
     for i, batch in tqdm.tqdm(enumerate(data), desc="batch"):
         batch = tuple(t.to(device) for t in batch)
-        batch_form_scores, batch_label_scores, batch_form_targets, batch_label_targets = [], [], [], []
-        batch_token_chars, batch_sent_ids, batch_num_tokens = [], [], []
-        for sent_xtoken, sent_token_chars, sent_form_chars, sent_labels in zip(*batch):
+        batch_form_scores = []
+        batch_label_scores = []
+
+        # prepare batch
+        batch_char_special_symbols = []
+        batch_form_targets = []
+        batch_input_token_chars = []
+        batch_label_targets = []
+        batch_max_form_len = []
+        batch_max_num_labels = []
+        batch_num_tokens = []
+        batch_sent_ids = []
+        batch_sent_xtoken = []
+        batch_target_token_form_chars = []
+        batch_token_chars = []
+
+        raw_batch_sent_xtoken, raw_batch_sent_token_chars, raw_batch_sent_form_chars, raw_batch_sent_labels = batch
+        for sent_xtoken, sent_token_chars, sent_form_chars, sent_labels in zip(raw_batch_sent_xtoken,
+                                                                               raw_batch_sent_token_chars,
+                                                                               raw_batch_sent_form_chars,
+                                                                               raw_batch_sent_labels):
             input_token_chars = sent_token_chars[:, :, -1]
             num_tokens = len(sent_token_chars[sent_token_chars[:, 0, 1] > 0])
             target_token_form_chars = sent_form_chars[:, :, -1]
@@ -424,23 +440,34 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
 
             # mask out labels of extra tokens (used to get for better context)
             if mask_extra_tokens_label:
-                mask_extra_tokens = (target_token_labels[:num_tokens, 0,
-                                     mask_extra_tokens_label_idx] != mask_extra_tokens_target_label)
+                mask_extra_tokens = target_token_labels[:num_tokens, 0,
+                                    mask_extra_tokens_label_idx] != mask_extra_tokens_target_label
 
                 form_targets *= mask_extra_tokens.view(-1, 1)
                 label_targets *= mask_extra_tokens.view(-1, 1, 1)
 
-            form_scores, _, label_scores = model(sent_xtoken, input_token_chars, char_special_symbols, num_tokens,
-                                                 max_form_len, max_num_labels,
-                                                 target_token_form_chars if use_teacher_forcing else None)
+            batch_char_special_symbols.append(char_special_symbols)
+            batch_form_targets.append(form_targets)
+            batch_input_token_chars.append(input_token_chars)
+            batch_label_targets.append(label_targets)
+            batch_max_form_len.append(max_form_len)
+            batch_max_num_labels.append(max_num_labels)
+            batch_num_tokens.append(num_tokens)
+            batch_sent_ids.append(sent_form_chars[:, :, 0].unique().item())
+            batch_sent_xtoken.append(sent_xtoken)
+            batch_target_token_form_chars.append(target_token_form_chars)
+            batch_token_chars.append(input_token_chars[:num_tokens])
 
+        # process batch
+        for form_scores, _, label_scores in model.batch_forward(batch_sent_xtoken,
+                                                                batch_input_token_chars,
+                                                                batch_char_special_symbols,
+                                                                batch_num_tokens,
+                                                                batch_max_form_len,
+                                                                batch_max_num_labels,
+                                                                batch_target_token_form_chars if use_teacher_forcing else None):
             batch_form_scores.append(form_scores)
             batch_label_scores.append(label_scores)
-            batch_form_targets.append(form_targets)
-            batch_label_targets.append(label_targets)
-            batch_token_chars.append(input_token_chars[:num_tokens])
-            batch_sent_ids.append(sent_form_chars[:, :, 0].unique().item())
-            batch_num_tokens.append(num_tokens)
 
         # Decode
         batch_form_scores = nn.utils.rnn.pad_sequence(batch_form_scores, batch_first=True)
