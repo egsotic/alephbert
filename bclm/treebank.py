@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from bclm import ne_evaluate_mentions
-from bclm.format import conllx, conllu
+from . import ne_evaluate_mentions
+from .format import conllx, conllu
 
 
 # gen=F|gen=M -> gen=FM, num=P|num=D -> num=DP
