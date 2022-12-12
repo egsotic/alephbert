@@ -301,6 +301,7 @@ def main(config):
     else:
         epoch = epochs
         out_epoch_dir_path = out_dir_path / str(epoch)
+        out_epoch_dir_path.mkdir(parents=True, exist_ok=True)
 
         if predict_train:
             run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
