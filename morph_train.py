@@ -133,7 +133,7 @@ def main(config):
             logging.info(f'Saving {tb_schema} {out_morph_type} tensor dataset to {file_path}')
             torch.save(datasets[part], file_path)
 
-    train_dataloader = DataLoader(datasets['train'], batch_size=32, shuffle=True)
+    train_dataloader = DataLoader(datasets['train'], batch_size=4, shuffle=True)
     dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
     test_dataloader = DataLoader(datasets['test'], batch_size=100)
 

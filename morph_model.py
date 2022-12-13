@@ -51,6 +51,11 @@ class BertTokenEmbeddingModel(nn.Module):
         batch_bert_emb_tokens = batch_bert_output.last_hidden_state
         emb_tokens = []
 
+        # remove CLS token
+        batch_mask[torch.eq(batch_token_seq[:, :, 1], self.bert_tokenizer.cls_token_id)] = False
+        # remove SEP token
+        batch_mask[torch.eq(batch_token_seq[:, :, 1], self.bert_tokenizer.sep_token_id)] = False
+
         for i in range(len(batch_token_seq)):
             idxs, vals = torch.unique_consecutive(batch_token_seq[i, :, 0][batch_mask[i]], return_counts=True)
             token_emb_xtoken_split = torch.split_with_sizes(batch_bert_emb_tokens[i][batch_mask[i]], tuple(vals))
@@ -162,8 +167,7 @@ class SegmentDecoder(nn.Module):
                       batch_max_out_char_seq_len, batch_max_num_labels, batch_target_char_seq):
         # batch_enc_state -> remove CLS (first) and take [:num_tokens]
         batch_enc_state = [
-            # TODO: move to BERT embeddings and change forward token_idx + 1 accordingly
-            sent_enc_state[1: num_tokens + 1]
+            sent_enc_state[:num_tokens]
             for sent_enc_state, num_tokens in zip(batch_enc_state, batch_num_tokens)
         ]
 
@@ -360,7 +364,7 @@ class MorphSequenceModel(nn.Module):
         for _ in self.segment_decoder.classifiers:
             out_label_scores.append([])
         for cur_token_idx in range(num_tokens):
-            cur_token_state = token_ctx[cur_token_idx + 1]
+            cur_token_state = token_ctx[cur_token_idx]
             cur_input_chars = char_seq[cur_token_idx]
             cur_target_chars = None
             if target_chars is not None:
