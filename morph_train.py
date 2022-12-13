@@ -465,6 +465,7 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
                                                                 batch_num_tokens,
                                                                 batch_max_form_len,
                                                                 batch_max_num_labels,
+                                                                # TODO: when using teacher forcing < 1.0, need to apply per example, not per batch
                                                                 batch_target_token_form_chars if use_teacher_forcing else None):
             batch_form_scores.append(form_scores)
             batch_label_scores.append(label_scores)
@@ -491,9 +492,8 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
 
         # Optimization Step
         if optimizer is not None:
-            form_loss.backward(retain_graph=len(label_losses) > 0)
-            for j in range(len(label_losses)):
-                label_losses[j].backward(retain_graph=(j < len(label_losses) - 1))
+            mtl_loss = form_loss + sum(label_losses)
+            mtl_loss.backward()
             if max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
