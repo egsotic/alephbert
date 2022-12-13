@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_sequence
 from transformers import BertModel, BertTokenizer
 
 from conditional_random_field import ConditionalRandomField, allowed_transitions
@@ -105,18 +106,38 @@ class LabelClassifier(nn.Module):
         return decoded_labels
 
 
+class View(nn.Module):
+
+    def __init__(self, shape):
+        super().__init__()
+
+        self.shape = shape
+
+    def forward(self, t):
+        return t.view(*self.shape)
+
+
 class SegmentDecoder(nn.Module):
 
-    def __init__(self, char_emb: nn.Embedding, hidden_size, num_layers, dropout, char_dropout, char_out_size,
+    def __init__(self, char_emb: nn.Embedding, token_context_size, hidden_size, num_layers, dropout, char_dropout, char_out_size,
                  labels_configs: list = None):
         super(SegmentDecoder, self).__init__()
         if labels_configs is None:
             labels_configs = []
         self.char_emb = char_emb
+
+        enc_bidirectional = False
+        dirs = 2 if enc_bidirectional else 1
+
+        # token representation -> h0 = dirs * num_layers * B * hidden_size
+        self.context_to_enc_h0 = nn.Sequential(
+            nn.Linear(token_context_size, dirs * num_layers * hidden_size),
+            View((dirs * num_layers, -1, hidden_size)),
+        )
         self.char_encoder = nn.GRU(input_size=char_emb.embedding_dim,
                                    hidden_size=hidden_size,
                                    num_layers=num_layers,
-                                   bidirectional=False,
+                                   bidirectional=enc_bidirectional,
                                    batch_first=False,
                                    dropout=dropout)
         self.char_decoder = nn.GRU(input_size=char_emb.embedding_dim,
@@ -136,6 +157,56 @@ class SegmentDecoder(nn.Module):
     @property
     def dec_num_layers(self):
         return self.char_decoder.num_layers
+
+    def batch_forward(self, batch_char_seq, batch_enc_state, special_symbols, batch_num_tokens,
+                      batch_max_out_char_seq_len, batch_max_num_labels, batch_target_char_seq):
+        # batch_enc_state -> remove CLS (first) and take [:num_tokens]
+        batch_enc_state = [
+            # TODO: move to BERT embeddings and change forward token_idx + 1 accordingly
+            sent_enc_state[1: num_tokens + 1]
+            for sent_enc_state, num_tokens in zip(batch_enc_state, batch_num_tokens)
+        ]
+
+        batch_enc_output = self._batch_forward_encode(batch_char_seq, batch_enc_state, batch_num_tokens)
+        batch_sent_enc_output = torch.split_with_sizes(batch_enc_output, split_sizes=batch_num_tokens)
+
+        for (sent_char_seq,
+             sent_enc_state,
+             sent_num_tokens,
+             sent_max_out_char_seq_len,
+             sent_max_num_labels,
+             sent_target_char_seq) in zip(batch_char_seq,
+                                          batch_sent_enc_output,
+                                          batch_num_tokens,
+                                          batch_max_out_char_seq_len,
+                                          batch_max_num_labels,
+                                          batch_target_char_seq):
+            out_char_scores, out_char_states = [], []
+            out_label_scores = []
+            for _ in self.classifiers:
+                out_label_scores.append([])
+
+            for cur_token_idx in range(sent_num_tokens):
+                cur_token_state = sent_enc_state[cur_token_idx]
+                cur_input_chars = sent_char_seq[cur_token_idx]
+                cur_target_chars = None
+                if sent_target_char_seq is not None:
+                    cur_target_chars = sent_target_char_seq[cur_token_idx]
+
+                seg_output = self.forward(cur_input_chars, cur_token_state, special_symbols, sent_max_out_char_seq_len,
+                                          cur_target_chars, sent_max_num_labels)
+
+                cur_token_segment_scores, cur_token_segment_states, cur_token_label_scores = seg_output
+                out_char_scores.append(cur_token_segment_scores)
+                out_char_states.append(cur_token_segment_states)
+                for out_scores, seg_scores in zip(out_label_scores, cur_token_label_scores):
+                    out_scores.append(seg_scores)
+
+            out_char_scores = torch.cat(out_char_scores, dim=0)
+            out_char_states = torch.cat(out_char_states, dim=0)
+            out_label_scores = [torch.cat(label_scores, dim=0) for label_scores in out_label_scores]
+
+            yield out_char_scores, out_char_states, out_label_scores
 
     def forward(self, char_seq, enc_state, special_symbols, max_out_char_seq_len, target_char_seq, max_num_labels):
         char_scores, char_states, label_scores = [], [], []
@@ -187,6 +258,28 @@ class SegmentDecoder(nn.Module):
         enc_output, enc_state = self.char_encoder(emb_chars, enc_state)
         return enc_output, enc_state
 
+    def _batch_forward_encode(self, batch_char_seq, batch_enc_state, batch_num_tokens):
+        # take all sents' tokens' char_seq as a single seq
+        # [t_1_1, ..., t_1_n1], [t_2_1, ..., t_2_n2] ... -> [t_1_1, ... t_1_n1, t_2_1, ... t_2_n2, ...]
+        batch_emb_char_flatten = [
+            # TODO: char_emb batching could possibly help (process: cat, embd, split)
+            self.char_emb(token_char_seq[torch.ne(token_char_seq, 0)])
+            for sent_char_seq, num_tokens in zip(batch_char_seq, batch_num_tokens)
+            for token_char_seq in sent_char_seq[:num_tokens]
+        ]
+
+        # cat seqs (of variable lens) into a single seq
+        h0 = torch.cat(batch_enc_state, dim=0)
+        # context space -> h0
+        h0 = self.context_to_enc_h0(h0)
+        batch_emb_char_packed = pack_sequence(batch_emb_char_flatten, enforce_sorted=False)
+
+        enc_output, enc_state = self.char_encoder(batch_emb_char_packed, h0)
+        # (dirs * num_layers, *, hidden_size) -> (*, dirs * num_layers * hidden_size)
+        enc_state = enc_state.transpose(0, 1).reshape(enc_state.shape[1], -1)
+
+        return enc_state
+
     def _forward_decoder_step(self, cur_dec_char, dec_char_state, target_char_seq, num_scores, sep):
         emb_dec_char = self.char_emb(cur_dec_char).unsqueeze(1)
         dec_char_output, dec_char_state = self.char_decoder(emb_dec_char, dec_char_state)
@@ -225,16 +318,13 @@ class MorphSequenceModel(nn.Module):
     def embedding_dim(self):
         return self.xtoken_emb.embedding_dim
 
-    def batch_forward(self, batch_xtoken_seq, batch_char_seq, batch_special_symbols, batch_num_tokens,
-                      batch_max_form_len, batch_max_num_labels, batch_target_chars=None):
+    def batch_forward(self, batch_xtoken_seq, batch_char_seq, special_symbols, batch_num_tokens,
+                      batch_max_form_len, batch_max_num_labels, batch_target_chars):
         batch_xtoken_seq = torch.stack(batch_xtoken_seq, dim=0)
         batch_token_ctx = self.xtoken_emb(batch_xtoken_seq)
 
-        for token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels, target_chars in zip(
-                batch_token_ctx, batch_char_seq, batch_special_symbols, batch_num_tokens,
-                batch_max_form_len, batch_max_num_labels, batch_target_chars):
-            yield self._forward(token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
-                                target_chars)
+        yield from self._batch_forward_new(batch_token_ctx, batch_char_seq, special_symbols, batch_num_tokens,
+                                           batch_max_form_len, batch_max_num_labels, batch_target_chars)
 
     def forward(self, xtoken_seq, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
                 target_chars=None):
@@ -242,6 +332,25 @@ class MorphSequenceModel(nn.Module):
 
         return self._forward(token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
                              target_chars)
+
+    def _batch_forward_loop(self, batch_token_ctx, batch_char_seq, special_symbols, batch_num_tokens,
+                            batch_max_form_len,
+                            batch_max_num_labels, batch_target_chars):
+        for token_ctx, char_seq, num_tokens, max_form_len, max_num_labels, target_chars in zip(
+                batch_token_ctx, batch_char_seq, batch_num_tokens, batch_max_form_len, batch_max_num_labels,
+                batch_target_chars):
+            yield self._forward(token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
+                                target_chars)
+
+    def _batch_forward_new(self, batch_token_ctx, batch_char_seq, special_symbols, batch_num_tokens, batch_max_form_len,
+                           batch_max_num_labels, batch_target_chars):
+        yield from self.segment_decoder.batch_forward(batch_char_seq,
+                                                      batch_token_ctx,
+                                                      special_symbols,
+                                                      batch_num_tokens,
+                                                      batch_max_form_len,
+                                                      batch_max_num_labels,
+                                                      batch_target_chars)
 
     def _forward(self, token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
                  target_chars=None):
