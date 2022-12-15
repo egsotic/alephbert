@@ -5,6 +5,8 @@ import logging
 import os
 from pathlib import Path
 
+import tqdm
+
 
 def load_config(path: Path):
     with open(path) as f:
@@ -29,7 +31,7 @@ def main(config):
     template = template_config['template']
     placeholder_params = placeholder_config
 
-    for values in itertools.product(*placeholder_params.values()):
+    for values in tqdm.tqdm(itertools.product(*placeholder_params.values())):
         # placeholders
         placeholders = {}
         for k, v in zip(placeholder_params.keys(), values):
@@ -45,16 +47,28 @@ def main(config):
 
         # skip
         if conf_path.exists() and not override_existing:
+            print('skipping existing', conf_path)
             continue
 
         # conf
         conf = {}
 
         for k, v in template.items():
-            conf[k] = v
+            # special rule
+            if '@' in k:
+                key, func = k.split('@')
+                # keep as value, no string formatting (e.g. list)
+                if func == 'value':
+                    conf[key] = placeholders[v]
+                else:
+                    print(f'unknown func {func} in key {k}')
+            # regular case
+            else:
+                conf[k] = v
 
-            if isinstance(v, str):
-                conf[k] = conf[k].format(**placeholders)
+                # string formatting
+                if isinstance(v, str):
+                    conf[k] = conf[k].format(**placeholders)
 
         # save
         with open(conf_path, 'w') as f:
