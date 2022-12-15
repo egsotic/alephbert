@@ -455,7 +455,7 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
             batch_num_tokens.append(num_tokens)
             batch_sent_ids.append(sent_form_chars[:, :, 0].unique().item())
             batch_sent_xtoken.append(sent_xtoken)
-            batch_target_token_form_chars.append(target_token_form_chars)
+            batch_target_token_form_chars.append(target_token_form_chars if use_teacher_forcing else None)
             batch_token_chars.append(input_token_chars[:num_tokens])
 
         # process batch
@@ -465,8 +465,7 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
                                                                 batch_num_tokens,
                                                                 batch_max_form_len,
                                                                 batch_max_num_labels,
-                                                                # TODO: when using teacher forcing < 1.0, need to apply per example, not per batch
-                                                                batch_target_token_form_chars if use_teacher_forcing else None):
+                                                                batch_target_token_form_chars):
             batch_form_scores.append(form_scores)
             batch_label_scores.append(label_scores)
 
