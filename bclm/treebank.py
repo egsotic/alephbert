@@ -119,15 +119,15 @@ def spmrl(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     return partition
 
 
-def ud(data_root_path, tb_name, tb_root_path=None, ma_name=None):
+def ud(data_root_path, tb_root_path=None, lang=None, tb_name=None, la_name=None, ma_name=None):
     logging.info('UD lattices')
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
-    data_tb_path = Path(data_root_path) / tb_name / ma_type
+    data_tb_path = Path(data_root_path) / lang / tb_name / ma_type
     if tb_root_path is not None:
         data_tb_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f'Loading treebank: {tb_root_path}')
-        partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
+        logging.info(f'Loading treebank: {tb_root_path} {lang} {tb_name}')
+        partition = conllu.load_conllu(tb_root_path, partition, lang, la_name, tb_name, ma_name)
         for part in partition:
             lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
             logging.info(f'Saving: {lattice_file_path}')

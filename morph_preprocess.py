@@ -34,19 +34,32 @@ def main(config):
     # else:
     #     tokenizer_version = transformer_type
 
+    # UD dir name format: UD_{lang}-{tb_name}
+    # UD file name format: {la_name}_{tb_name}-ud-{partition_type}.conllu
+    lang = config['lang']
+    tb_name = config['tb_name']
+    la_name = config['la_name']
     tb_root_path = Path(config['tb_root_path'])
     raw_root_path = Path(config['raw_root_path'])
     preprocessed_root_path = Path(config['preprocessed_root_path'])
     fasttext_lang = config['fasttext_lang']
     fasttext_model_path = Path(config['fasttext_model_path'])
 
-    preprocessed_root_path = preprocessed_root_path / bert_tokenizer_name
+    preprocessed_root_path = preprocessed_root_path / lang / tb_name / bert_tokenizer_name
     preprocessed_root_path.mkdir(parents=True, exist_ok=False)
 
-    if not raw_root_path.exists():
-        raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path=tb_root_path)
+    if not (raw_root_path / lang / tb_name).exists():
+        raw_partition = tb.ud(raw_root_path,
+                              tb_root_path=tb_root_path,
+                              lang=lang,
+                              tb_name=tb_name,
+                              la_name=la_name)
     else:
-        raw_partition = tb.ud(raw_root_path, 'HTB', tb_root_path=None)
+        raw_partition = tb.ud(raw_root_path,
+                              tb_root_path=None,
+                              lang=lang,
+                              tb_name=tb_name,
+                              la_name=la_name)
 
     # tokenizer
     bert_tokenizer = AutoTokenizer.from_pretrained(bert_tokenizer_path)
