@@ -19,7 +19,7 @@ from bclm import treebank as tb
 from constants import PAD, SOS, EOS, SEP
 from data import preprocess_form, preprocess_labels
 from morph_model import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
-from utils import freeze_model, unfreeze_model
+from utils import freeze_model, unfreeze_model, get_ud_preprocessed_dir_path
 
 
 def main(config):
@@ -33,9 +33,12 @@ def main(config):
     )
 
     # Config
+    # treebank schema (UD)
     tb_schema = config['tb_schema']
-    tb_data_src = config['tb_data_src']
+    # language/treebank
+    lang = config['lang']
     tb_name = config['tb_name']
+    la_name = config['la_name']
 
     # bert
     bert_tokenizer_name = config['bert_tokenizer_name']
@@ -52,7 +55,7 @@ def main(config):
     # paths
     raw_root_path = Path(config['raw_root_path'])
     preprocessed_root_path = Path(config['preprocessed_root_path'])
-    preprocessed_root_path /= bert_tokenizer_name
+    preprocessed_dir_path = get_ud_preprocessed_dir_path(preprocessed_root_path, lang, tb_name, bert_tokenizer_name)
     out_root_path = Path(config['out_root_path'])
 
     # control
@@ -84,20 +87,19 @@ def main(config):
     # data
     ner_feat_name = config.get('ner_feat_name', 'ner')
 
-    if tb_name == 'HTB':
-        partition = tb.ud(raw_root_path, tb_name)
-    elif tb_name == 'hebtb':
-        if tb_schema == "UD":
-            partition = tb.spmrl_conllu(raw_root_path, tb_name)
-        else:
-            partition = tb.spmrl(raw_root_path, tb_name)
+    if tb_schema == 'UD':
+        partition = tb.ud(raw_root_path,
+                          tb_root_path=raw_root_path,
+                          lang=lang,
+                          tb_name=tb_name,
+                          la_name=la_name)
     else:
         partition = {'train': None, 'dev': None, 'test': None}
 
     datasets = {}
 
     if label_names is None:
-        label_names = preprocess_labels.get_label_names(preprocessed_root_path, partition)
+        label_names = preprocess_labels.get_label_names(preprocessed_dir_path, partition)
 
     # Output folder path
     out_morph_type = 'morph_seg'
@@ -113,13 +115,13 @@ def main(config):
         else:
             out_morph_type = f'{out_morph_type}_feats'
 
-    out_dir_path = out_root_path / out_morph_type / bert_model_name / bert_tokenizer_name / tb_data_src / tb_name
+    out_dir_path = out_root_path / lang / tb_name / out_morph_type / bert_model_name / bert_tokenizer_name
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
     with open(out_dir_path / "config.json", 'w') as f:
         json.dump(config, f, ensure_ascii=False, indent=4)
 
-    data_samples_file_paths = {part: preprocessed_root_path / f'{part}_{out_morph_type}_data_samples.pt'
+    data_samples_file_paths = {part: preprocessed_dir_path / f'{part}_{out_morph_type}_data_samples.pt'
                                for part in partition}
     if all([data_samples_file_paths[part].exists() for part in data_samples_file_paths]):
         for part in partition:
@@ -127,13 +129,13 @@ def main(config):
             logging.info(f'Loading {tb_schema} {out_morph_type} tensor dataset from {file_path}')
             datasets[part] = torch.load(file_path)
     else:
-        datasets = load_preprocessed_data_samples(preprocessed_root_path, partition, label_names, tb_schema)
+        datasets = load_preprocessed_data_samples(preprocessed_dir_path, partition, label_names)
         for part in datasets:
             file_path = data_samples_file_paths[part]
             logging.info(f'Saving {tb_schema} {out_morph_type} tensor dataset to {file_path}')
             torch.save(datasets[part], file_path)
 
-    train_dataloader = DataLoader(datasets['train'], batch_size=32, shuffle=True)
+    train_dataloader = DataLoader(datasets['train'], batch_size=4, shuffle=False)
     dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
     test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
@@ -142,8 +144,8 @@ def main(config):
     bert = AutoModel.from_pretrained(bert_model_path)
 
     # Vocabs
-    char_vectors, char_vocab = preprocess_labels.load_char_vocab(preprocessed_root_path)
-    label_vocab = preprocess_labels.load_label_vocab(preprocessed_root_path, partition, pad=PAD)
+    char_vectors, char_vocab = preprocess_labels.load_char_vocab(preprocessed_dir_path)
+    label_vocab = preprocess_labels.load_label_vocab(preprocessed_dir_path, partition, pad=PAD)
 
     # Special symbols
     char_sos = torch.tensor([char_vocab['char2id'][SOS]], dtype=torch.long)
@@ -369,8 +371,8 @@ def run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label
         wandb.log(log_dict)
 
 
-def load_preprocessed_data_samples(data_root_path, partition, label_names, tb_schema) -> dict:
-    logging.info(f'Loading preprocesssed {tb_schema} form tag data samples')
+def load_preprocessed_data_samples(data_root_path, partition, label_names) -> dict:
+    logging.info(f'Loading preprocesssed {data_root_path} form tag data samples')
     xtoken_data = preprocess_form.load_xtoken_data(data_root_path, partition)
     token_char_data = preprocess_form.load_token_char_data(data_root_path, partition)
     form_char_data = preprocess_form.load_form_data(data_root_path, partition)

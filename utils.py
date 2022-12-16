@@ -1,6 +1,7 @@
 import json
 from collections import Counter
 from itertools import zip_longest
+from pathlib import Path
 from typing import List, Set
 
 import numpy as np
@@ -10,6 +11,7 @@ import torch
 from torch import nn as nn
 
 from bclm import treebank as tb
+from bclm.format.conllu import get_ud_treebank_dir_path
 
 
 def to_sent_tokens(token_chars, id2char: dict) -> list:
@@ -275,3 +277,7 @@ def freeze_model(model: nn.Module):
 def unfreeze_model(model: nn.Module):
     for param in model.parameters():
         param.requires_grad = True
+
+
+def get_ud_preprocessed_dir_path(preprocessed_root_path: Path, lang: str, tb_name: str, bert_tokenizer_name: str):
+    return get_ud_treebank_dir_path(preprocessed_root_path, lang, tb_name) / bert_tokenizer_name

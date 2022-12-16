@@ -1,4 +1,6 @@
 from copy import copy
+from pathlib import Path
+
 import pandas as pd
 import unicodedata
 from .format_utils import split_sentences, lattice_fields
@@ -72,8 +74,12 @@ def load_conllu(tb_path, partition, lang, la_name, tb_name, ma_name=None):
         if ma_name is not None:
             lattices_path = tb_path / f'conllul/UL_{lang}-{tb_name}' / f'{file_name}.{ma_name}.conllul'
         else:
-            lattices_path = tb_path / f'UD_{lang}-{tb_name}' / f'{file_name}.conllu'
+            lattices_path = get_ud_treebank_dir_path(tb_path, lang, tb_name) / f'{file_name}.conllu'
         lattice_sentences = split_sentences(lattices_path)
         lattices_df = _load_conllu_partition_df(lattice_sentences, ma_name is None)
         treebank[partition_type] = lattices_df
     return treebank
+
+
+def get_ud_treebank_dir_path(root_path: Path, lang: str, tb_name: str):
+    return root_path / f'UD_{lang}-{tb_name}'
