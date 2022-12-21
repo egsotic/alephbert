@@ -278,12 +278,10 @@ def main(config):
 
             # eval
             if epoch % eval_epochs == 0:
-                run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
-                         label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader,
-                         fix_extra_tokens=eval_fix_extra_tokens)
-                run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
-                         label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader,
-                         fix_extra_tokens=eval_fix_extra_tokens)
+                run_all_predict(predict_train, do_eval, do_test, char_special_symbols, char_vocab, dev_dataloader,
+                                device, epoch, eval_fields, eval_fix_extra_tokens, label_names, label_pads, label_vocab,
+                                loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader,
+                                train_dataloader)
 
                 # if 'biose_layer0' in label_names:
                 #     utils.save_ner(dev_samples, out_dir_path / 'morph_label_dev.bmes', 'biose_layer0')
@@ -303,19 +301,27 @@ def main(config):
         out_epoch_dir_path = out_dir_path / str(epoch)
         out_epoch_dir_path.mkdir(parents=True, exist_ok=True)
 
-        if predict_train:
-            run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
-                           label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every,
-                           train_dataloader,
-                           fix_extra_tokens=eval_fix_extra_tokens)
-        if do_eval:
-            run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
-                     loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader,
-                     fix_extra_tokens=eval_fix_extra_tokens)
-        if do_test:
-            run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
-                     label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader,
-                     fix_extra_tokens=eval_fix_extra_tokens)
+        run_all_predict(predict_train, do_eval, do_test, char_special_symbols, char_vocab, dev_dataloader, device,
+                        epoch, eval_fields, eval_fix_extra_tokens, label_names, label_pads, label_vocab, loss_fct,
+                        md_model, out_epoch_dir_path, partition, print_every, test_dataloader, train_dataloader)
+
+
+def run_all_predict(predict_train, do_eval, do_test, char_special_symbols, char_vocab, dev_dataloader, device, epoch,
+                    eval_fields, eval_fix_extra_tokens, label_names, label_pads, label_vocab, loss_fct, md_model,
+                    out_epoch_dir_path, partition, print_every, test_dataloader, train_dataloader):
+    if predict_train:
+        run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
+                       label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every,
+                       train_dataloader,
+                       fix_extra_tokens=eval_fix_extra_tokens)
+    if do_eval:
+        run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
+                 loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader,
+                 fix_extra_tokens=eval_fix_extra_tokens)
+    if do_test:
+        run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
+                 label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader,
+                 fix_extra_tokens=eval_fix_extra_tokens)
 
 
 def run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
