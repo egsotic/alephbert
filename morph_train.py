@@ -173,15 +173,18 @@ def main(config):
         label_classifier_configs.append(label_classifier_config)
 
     if md_strategry == "morph-pipeline":
-        segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
+        segmentor = SegmentDecoder(char_emb, xtoken_emb.embedding_dim, hidden_size, num_layers, dropout, out_dropout,
+                                   num_chars)
         md_model = MorphPipelineModel(xtoken_emb, segmentor, hidden_size, num_layers, dropout, out_dropout,
                                       label_classifier_configs)
     elif md_strategry == "morph-sequence":
-        segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars,
+        segmentor = SegmentDecoder(char_emb, xtoken_emb.embedding_dim, hidden_size, num_layers, dropout, out_dropout,
+                                   num_chars,
                                    label_classifier_configs)
         md_model = MorphSequenceModel(xtoken_emb, segmentor)
     elif md_strategry == "segment-only":
-        segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
+        segmentor = SegmentDecoder(char_emb, xtoken_emb.embedding_dim, hidden_size, num_layers, dropout, out_dropout,
+                                   num_chars)
         md_model = MorphSequenceModel(xtoken_emb, segmentor)
     else:
         raise KeyError(f'unknown md_strategry {md_strategry}')
@@ -418,7 +421,6 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
         batch_label_scores = []
 
         # prepare batch
-        batch_char_special_symbols = []
         batch_form_targets = []
         batch_input_token_chars = []
         batch_label_targets = []
@@ -454,7 +456,6 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
                 form_targets *= mask_extra_tokens.view(-1, 1)
                 label_targets *= mask_extra_tokens.view(-1, 1, 1)
 
-            batch_char_special_symbols.append(char_special_symbols)
             batch_form_targets.append(form_targets)
             batch_input_token_chars.append(input_token_chars)
             batch_label_targets.append(label_targets)
@@ -469,7 +470,7 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
         # process batch
         for form_scores, _, label_scores in model.batch_forward(batch_sent_xtoken,
                                                                 batch_input_token_chars,
-                                                                batch_char_special_symbols,
+                                                                char_special_symbols,
                                                                 batch_num_tokens,
                                                                 batch_max_form_len,
                                                                 batch_max_num_labels,
