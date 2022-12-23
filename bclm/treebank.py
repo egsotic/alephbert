@@ -7,6 +7,7 @@ import pandas as pd
 
 from . import ne_evaluate_mentions
 from .format import conllx, conllu
+from .format.conllu import get_ud_treebank_dir_path
 
 
 # gen=F|gen=M -> gen=FM, num=P|num=D -> num=DP
@@ -119,22 +120,23 @@ def spmrl(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     return partition
 
 
-def ud(data_root_path, tb_name, tb_root_path=None, ma_name=None):
+def ud(output_data_root_path, tb_root_path=None, lang=None, tb_name=None, la_name=None, ma_name=None,
+       overwrite_existing=False):
     logging.info('UD lattices')
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
-    data_tb_path = Path(data_root_path) / tb_name / ma_type
-    if tb_root_path is not None:
-        data_tb_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f'Loading treebank: {tb_root_path}')
-        partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
+    output_data_tb_path = get_ud_treebank_dir_path(output_data_root_path, lang, tb_name) / ma_type
+    if tb_root_path is not None and (not output_data_tb_path.exists() or overwrite_existing):
+        output_data_tb_path.mkdir(parents=True, exist_ok=True)
+        logging.info(f'Loading treebank: {tb_root_path} {lang} {tb_name}')
+        partition = conllu.load_conllu(tb_root_path, partition, lang, la_name, tb_name, ma_name)
         for part in partition:
-            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            lattice_file_path = output_data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
             logging.info(f'Saving: {lattice_file_path}')
             partition[part].to_csv(lattice_file_path)
     else:
         for part in partition:
-            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            lattice_file_path = output_data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
             logging.info(f'Loading: {lattice_file_path}')
             partition[part] = pd.read_csv(lattice_file_path, index_col=0)
     return partition
