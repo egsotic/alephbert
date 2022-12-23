@@ -19,7 +19,7 @@ from bclm import treebank as tb
 from constants import PAD, SOS, EOS, SEP
 from data import preprocess_form, preprocess_labels
 from morph_model import BertTokenEmbeddingModel, SegmentDecoder, MorphSequenceModel, MorphPipelineModel
-from utils import freeze_model, unfreeze_model
+from utils import freeze_model, unfreeze_model, get_ud_preprocessed_dir_path
 
 
 def main(config):
@@ -33,9 +33,12 @@ def main(config):
     )
 
     # Config
+    # treebank schema (UD)
     tb_schema = config['tb_schema']
-    tb_data_src = config['tb_data_src']
+    # language/treebank
+    lang = config['lang']
     tb_name = config['tb_name']
+    la_name = config['la_name']
 
     # bert
     bert_tokenizer_name = config['bert_tokenizer_name']
@@ -52,7 +55,7 @@ def main(config):
     # paths
     raw_root_path = Path(config['raw_root_path'])
     preprocessed_root_path = Path(config['preprocessed_root_path'])
-    preprocessed_root_path /= bert_tokenizer_name
+    preprocessed_dir_path = get_ud_preprocessed_dir_path(preprocessed_root_path, lang, tb_name, bert_tokenizer_name)
     out_root_path = Path(config['out_root_path'])
 
     # control
@@ -84,20 +87,19 @@ def main(config):
     # data
     ner_feat_name = config.get('ner_feat_name', 'ner')
 
-    if tb_name == 'HTB':
-        partition = tb.ud(raw_root_path, tb_name)
-    elif tb_name == 'hebtb':
-        if tb_schema == "UD":
-            partition = tb.spmrl_conllu(raw_root_path, tb_name)
-        else:
-            partition = tb.spmrl(raw_root_path, tb_name)
+    if tb_schema == 'UD':
+        partition = tb.ud(raw_root_path,
+                          tb_root_path=raw_root_path,
+                          lang=lang,
+                          tb_name=tb_name,
+                          la_name=la_name)
     else:
         partition = {'train': None, 'dev': None, 'test': None}
 
     datasets = {}
 
     if label_names is None:
-        label_names = preprocess_labels.get_label_names(preprocessed_root_path, partition)
+        label_names = preprocess_labels.get_label_names(preprocessed_dir_path, partition)
 
     # Output folder path
     out_morph_type = 'morph_seg'
@@ -113,13 +115,13 @@ def main(config):
         else:
             out_morph_type = f'{out_morph_type}_feats'
 
-    out_dir_path = out_root_path / out_morph_type / bert_model_name / bert_tokenizer_name / tb_data_src / tb_name
+    out_dir_path = out_root_path / lang / tb_name / out_morph_type / bert_model_name / bert_tokenizer_name
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
     with open(out_dir_path / "config.json", 'w') as f:
         json.dump(config, f, ensure_ascii=False, indent=4)
 
-    data_samples_file_paths = {part: preprocessed_root_path / f'{part}_{out_morph_type}_data_samples.pt'
+    data_samples_file_paths = {part: preprocessed_dir_path / f'{part}_{out_morph_type}_data_samples.pt'
                                for part in partition}
     if all([data_samples_file_paths[part].exists() for part in data_samples_file_paths]):
         for part in partition:
@@ -127,13 +129,13 @@ def main(config):
             logging.info(f'Loading {tb_schema} {out_morph_type} tensor dataset from {file_path}')
             datasets[part] = torch.load(file_path)
     else:
-        datasets = load_preprocessed_data_samples(preprocessed_root_path, partition, label_names, tb_schema)
+        datasets = load_preprocessed_data_samples(preprocessed_dir_path, partition, label_names)
         for part in datasets:
             file_path = data_samples_file_paths[part]
             logging.info(f'Saving {tb_schema} {out_morph_type} tensor dataset to {file_path}')
             torch.save(datasets[part], file_path)
 
-    train_dataloader = DataLoader(datasets['train'], batch_size=32, shuffle=True)
+    train_dataloader = DataLoader(datasets['train'], batch_size=4, shuffle=False)
     dev_dataloader = DataLoader(datasets['dev'], batch_size=100)
     test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
@@ -142,8 +144,8 @@ def main(config):
     bert = AutoModel.from_pretrained(bert_model_path)
 
     # Vocabs
-    char_vectors, char_vocab = preprocess_labels.load_char_vocab(preprocessed_root_path)
-    label_vocab = preprocess_labels.load_label_vocab(preprocessed_root_path, partition, pad=PAD)
+    char_vectors, char_vocab = preprocess_labels.load_char_vocab(preprocessed_dir_path)
+    label_vocab = preprocess_labels.load_label_vocab(preprocessed_dir_path, partition, pad=PAD)
 
     # Special symbols
     char_sos = torch.tensor([char_vocab['char2id'][SOS]], dtype=torch.long)
@@ -171,15 +173,18 @@ def main(config):
         label_classifier_configs.append(label_classifier_config)
 
     if md_strategry == "morph-pipeline":
-        segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
+        segmentor = SegmentDecoder(char_emb, xtoken_emb.embedding_dim, hidden_size, num_layers, dropout, out_dropout,
+                                   num_chars)
         md_model = MorphPipelineModel(xtoken_emb, segmentor, hidden_size, num_layers, dropout, out_dropout,
                                       label_classifier_configs)
     elif md_strategry == "morph-sequence":
-        segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars,
+        segmentor = SegmentDecoder(char_emb, xtoken_emb.embedding_dim, hidden_size, num_layers, dropout, out_dropout,
+                                   num_chars,
                                    label_classifier_configs)
         md_model = MorphSequenceModel(xtoken_emb, segmentor)
     elif md_strategry == "segment-only":
-        segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
+        segmentor = SegmentDecoder(char_emb, xtoken_emb.embedding_dim, hidden_size, num_layers, dropout, out_dropout,
+                                   num_chars)
         md_model = MorphSequenceModel(xtoken_emb, segmentor)
     else:
         raise KeyError(f'unknown md_strategry {md_strategry}')
@@ -276,12 +281,10 @@ def main(config):
 
             # eval
             if epoch % eval_epochs == 0:
-                run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
-                         label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader,
-                         fix_extra_tokens=eval_fix_extra_tokens)
-                run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
-                         label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader,
-                         fix_extra_tokens=eval_fix_extra_tokens)
+                run_all_predict(predict_train, do_eval, do_test, char_special_symbols, char_vocab, dev_dataloader,
+                                device, epoch, eval_fields, eval_fix_extra_tokens, label_names, label_pads, label_vocab,
+                                loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader,
+                                train_dataloader)
 
                 # if 'biose_layer0' in label_names:
                 #     utils.save_ner(dev_samples, out_dir_path / 'morph_label_dev.bmes', 'biose_layer0')
@@ -301,19 +304,27 @@ def main(config):
         out_epoch_dir_path = out_dir_path / str(epoch)
         out_epoch_dir_path.mkdir(parents=True, exist_ok=True)
 
-        if predict_train:
-            run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
-                           label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every,
-                           train_dataloader,
-                           fix_extra_tokens=eval_fix_extra_tokens)
-        if do_eval:
-            run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
-                     loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader,
-                     fix_extra_tokens=eval_fix_extra_tokens)
-        if do_test:
-            run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
-                     label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader,
-                     fix_extra_tokens=eval_fix_extra_tokens)
+        run_all_predict(predict_train, do_eval, do_test, char_special_symbols, char_vocab, dev_dataloader, device,
+                        epoch, eval_fields, eval_fix_extra_tokens, label_names, label_pads, label_vocab, loss_fct,
+                        md_model, out_epoch_dir_path, partition, print_every, test_dataloader, train_dataloader)
+
+
+def run_all_predict(predict_train, do_eval, do_test, char_special_symbols, char_vocab, dev_dataloader, device, epoch,
+                    eval_fields, eval_fix_extra_tokens, label_names, label_pads, label_vocab, loss_fct, md_model,
+                    out_epoch_dir_path, partition, print_every, test_dataloader, train_dataloader):
+    if predict_train:
+        run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
+                       label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every,
+                       train_dataloader,
+                       fix_extra_tokens=eval_fix_extra_tokens)
+    if do_eval:
+        run_eval(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
+                 loss_fct, md_model, out_epoch_dir_path, partition, print_every, dev_dataloader,
+                 fix_extra_tokens=eval_fix_extra_tokens)
+    if do_test:
+        run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads,
+                 label_vocab, loss_fct, md_model, out_epoch_dir_path, partition, print_every, test_dataloader,
+                 fix_extra_tokens=eval_fix_extra_tokens)
 
 
 def run_eval_train(char_special_symbols, char_vocab, device, epoch, eval_fields, label_names, label_pads, label_vocab,
@@ -369,8 +380,8 @@ def run_test(char_special_symbols, char_vocab, device, epoch, eval_fields, label
         wandb.log(log_dict)
 
 
-def load_preprocessed_data_samples(data_root_path, partition, label_names, tb_schema) -> dict:
-    logging.info(f'Loading preprocesssed {tb_schema} form tag data samples')
+def load_preprocessed_data_samples(data_root_path, partition, label_names) -> dict:
+    logging.info(f'Loading preprocesssed {data_root_path} form tag data samples')
     xtoken_data = preprocess_form.load_xtoken_data(data_root_path, partition)
     token_char_data = preprocess_form.load_token_char_data(data_root_path, partition)
     form_char_data = preprocess_form.load_form_data(data_root_path, partition)
@@ -410,7 +421,6 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
         batch_label_scores = []
 
         # prepare batch
-        batch_char_special_symbols = []
         batch_form_targets = []
         batch_input_token_chars = []
         batch_label_targets = []
@@ -446,7 +456,6 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
                 form_targets *= mask_extra_tokens.view(-1, 1)
                 label_targets *= mask_extra_tokens.view(-1, 1, 1)
 
-            batch_char_special_symbols.append(char_special_symbols)
             batch_form_targets.append(form_targets)
             batch_input_token_chars.append(input_token_chars)
             batch_label_targets.append(label_targets)
@@ -461,7 +470,7 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
         # process batch
         for form_scores, _, label_scores in model.batch_forward(batch_sent_xtoken,
                                                                 batch_input_token_chars,
-                                                                batch_char_special_symbols,
+                                                                char_special_symbols,
                                                                 batch_num_tokens,
                                                                 batch_max_form_len,
                                                                 batch_max_num_labels,
