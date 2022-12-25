@@ -173,18 +173,15 @@ def main(config):
         label_classifier_configs.append(label_classifier_config)
 
     if md_strategry == "morph-pipeline":
-        segmentor = SegmentDecoder(char_emb, xtoken_emb.embedding_dim, hidden_size, num_layers, dropout, out_dropout,
-                                   num_chars)
+        segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
         md_model = MorphPipelineModel(xtoken_emb, segmentor, hidden_size, num_layers, dropout, out_dropout,
                                       label_classifier_configs)
     elif md_strategry == "morph-sequence":
-        segmentor = SegmentDecoder(char_emb, xtoken_emb.embedding_dim, hidden_size, num_layers, dropout, out_dropout,
-                                   num_chars,
+        segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars,
                                    label_classifier_configs)
         md_model = MorphSequenceModel(xtoken_emb, segmentor)
     elif md_strategry == "segment-only":
-        segmentor = SegmentDecoder(char_emb, xtoken_emb.embedding_dim, hidden_size, num_layers, dropout, out_dropout,
-                                   num_chars)
+        segmentor = SegmentDecoder(char_emb, hidden_size, num_layers, dropout, out_dropout, num_chars)
         md_model = MorphSequenceModel(xtoken_emb, segmentor)
     else:
         raise KeyError(f'unknown md_strategry {md_strategry}')
