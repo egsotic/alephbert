@@ -1,0 +1,5 @@
+nohup python morph_preprocess.py --config_path /home/nlp/egsotic/repo/alephbert/configs/generated/UD-v2.11-ner/preprocess_AlephBERT_Hebrew_HTB_nemo.v_00.json > logs/preprocess_AlephBERT_Hebrew_HTB_nemo.v_00.txt &
+nohup python morph_preprocess.py --config_path /home/nlp/egsotic/repo/alephbert/configs/generated/UD-v2.11-ner/preprocess_AlephBERTGimel_Hebrew_HTB_nemo.v_00.json > logs/preprocess_AlephBERTGimel_Hebrew_HTB_nemo.v_00.txt &
+nohup python morph_preprocess.py --config_path /home/nlp/egsotic/repo/alephbert/configs/generated/UD-v2.11-ner/preprocess_heBERT_Hebrew_HTB_nemo.v_00.json > logs/preprocess_heBERT_Hebrew_HTB_nemo.v_00.txt &
+nohup python morph_preprocess.py --config_path /home/nlp/egsotic/repo/alephbert/configs/generated/UD-v2.11-ner/preprocess_mBERT_Hebrew_HTB_nemo.v_00.json > logs/preprocess_mBERT_Hebrew_HTB_nemo.v_00.txt &
+nohup python morph_preprocess.py --config_path /home/nlp/egsotic/repo/alephbert/configs/generated/UD-v2.11-ner/preprocess_XLM_Hebrew_HTB_nemo.v_00.json > logs/preprocess_XLM_Hebrew_HTB_nemo.v_00.txt &

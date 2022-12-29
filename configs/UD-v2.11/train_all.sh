@@ -1,0 +1,1 @@
+nohup env CUDA_VISIBLE_DEVICES=2 python morph_train.py --config_path configs/generated/UD-v2.11/train_XLM_Hebrew_HTB_nemo.json >> logs/train_XLM_Hebrew_HTB_nemo.log &

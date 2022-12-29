@@ -1,0 +1,62 @@
+{
+    "model": [
+        [
+            "mBERT",
+            "bert-base-multilingual-cased"
+        ],
+        [
+            "XLM",
+            "xlm-roberta-base"
+        ]
+    ],
+    "lang-tb_name-la-labels": [
+        [
+            "Arabic",
+            "PADT_fixed_truncated",
+            "ar",
+            ["tag", "Gender", "Number", "Person", "Aspect", "VerbForm"]
+        ],
+        [
+            "Turkish",
+            "Atis",
+            "tr",
+            ["tag", "Number", "Person", "Tense"]
+        ],
+        [
+            "Turkish",
+            "BOUN",
+            "tr",
+            ["tag", "Number", "Person", "Tense"]
+        ],
+        [
+            "Turkish",
+            "FrameNet",
+            "tr",
+            ["tag", "Number", "Person", "Tense"]
+        ],
+        [
+            "Turkish",
+            "IMST",
+            "tr",
+            ["tag", "Number", "Person", "Tense"]
+        ],
+        [
+            "Turkish",
+            "Kenet",
+            "tr",
+            ["tag", "Number", "Person", "Tense"]
+        ],
+        [
+            "Turkish",
+            "Penn",
+            "tr",
+            ["tag", "Number", "Person", "Tense"]
+        ],
+        [
+            "Turkish",
+            "Tourism",
+            "tr",
+            ["tag", "Number", "Person", "Tense"]
+        ]
+    ]
+}

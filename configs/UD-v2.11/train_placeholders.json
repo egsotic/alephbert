@@ -1,0 +1,42 @@
+{
+    "model": [
+        [
+            "AlephBERT",
+            "onlplab/alephbert-base"
+        ],
+        [
+            "mBERT",
+            "bert-base-multilingual-cased"
+        ],
+        [
+            "heBERT",
+            "avichr/heBERT"
+        ],
+        [
+            "AlephBERTGimel",
+            "/home/nlp/egsotic/data/AlephBERTGimel"
+        ],
+        [
+            "AlephBERTGimel_2.0",
+            "/home/nlp/egsotic/data/AlephBERTGimel_2.0"
+        ],
+        [
+            "XLM",
+            "xlm-roberta-base"
+        ]
+    ],
+    "lang-tb_name-la-labels": [
+        [
+            "Hebrew",
+            "HTB_nemo",
+            "he",
+            ["tag", "Gender", "Number", "Person", "Tense"]
+        ],
+        [
+            "Hebrew",
+            "IAHLTwiki",
+            "he",
+            ["tag", "Gender", "Number", "Person", "Tense", "PronType", "Definite", "Poss", "Case"]
+        ]
+    ]
+}
