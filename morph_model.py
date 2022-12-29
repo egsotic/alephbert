@@ -225,13 +225,13 @@ class MorphSequenceModel(nn.Module):
     def embedding_dim(self):
         return self.xtoken_emb.embedding_dim
 
-    def batch_forward(self, batch_xtoken_seq, batch_char_seq, batch_special_symbols, batch_num_tokens,
+    def batch_forward(self, batch_xtoken_seq, batch_char_seq, special_symbols, batch_num_tokens,
                       batch_max_form_len, batch_max_num_labels, batch_target_chars=None):
         batch_xtoken_seq = torch.stack(batch_xtoken_seq, dim=0)
         batch_token_ctx = self.xtoken_emb(batch_xtoken_seq)
 
-        for token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels, target_chars in zip(
-                batch_token_ctx, batch_char_seq, batch_special_symbols, batch_num_tokens,
+        for token_ctx, char_seq, num_tokens, max_form_len, max_num_labels, target_chars in zip(
+                batch_token_ctx, batch_char_seq, batch_num_tokens,
                 batch_max_form_len, batch_max_num_labels, batch_target_chars):
             yield self._forward(token_ctx, char_seq, special_symbols, num_tokens, max_form_len, max_num_labels,
                                 target_chars)
