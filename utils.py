@@ -223,7 +223,7 @@ def save_lattice(df, out_file_path):
 # Save bmes file used by the ner evaluation script
 def save_ner(df, out_file_path, ner_feat_name):
     gb = df.groupby('sent_id')
-    with open(out_file_path, 'w') as f:
+    with open(out_file_path, 'w', encoding='utf-8') as f:
         for sid, group in gb:
             for row in group[['form', 'feats']].itertuples():
                 if row.feats == '_':

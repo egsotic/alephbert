@@ -32,6 +32,8 @@ def main(config):
     placeholder_params = placeholder_config
 
     for values in tqdm.tqdm(itertools.product(*placeholder_params.values())):
+        print(values)
+
         # placeholders
         placeholders = {}
         for k, v in zip(placeholder_params.keys(), values):

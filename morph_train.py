@@ -412,7 +412,7 @@ def process(model: MorphSequenceModel, data: DataLoader, label_names: List[str],
         mask_extra_tokens_target_label = label_vocab['labels2id'][mask_extra_tokens_label][mask_extra_tokens_value]
         mask_extra_tokens_label_idx = label_names.index(mask_extra_tokens_label)
 
-    for i, batch in tqdm.tqdm(enumerate(data), desc="batch"):
+    for i, batch in tqdm.tqdm(enumerate(data), desc=f"{phase}/batch"):
         batch = tuple(t.to(device) for t in batch)
         batch_form_scores = []
         batch_label_scores = []
