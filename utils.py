@@ -1,9 +1,17 @@
 import json
-import torch
-import pandas as pd
-from itertools import zip_longest
 from collections import Counter
+from itertools import zip_longest
+from pathlib import Path
+from typing import List, Set
+
+import numpy as np
+import nvsmi
+import pandas as pd
+import torch
+from torch import nn as nn
+
 from bclm import treebank as tb
+from bclm.format.conllu import get_ud_treebank_dir_path
 
 
 def to_sent_tokens(token_chars, id2char: dict) -> list:
@@ -69,7 +77,7 @@ def _to_sent_token_lattice_rows(sent_id, tokens, token_segments, token_labels, l
         tags = labels['tag'] if 'tag' in labels else []
         feats_strs = _to_feats_strs({k: v for k, v in labels.items() if k != 'tag'})
         for form, tag, feat in zip_longest(forms, tags, feats_strs, fillvalue='_'):
-            row = [sent_id, node_id, node_id+1, form, '_', tag, feat, token_id+1, token, True]
+            row = [sent_id, node_id, node_id + 1, form, '_', tag, feat, token_id + 1, token, True]
             rows.append(row)
             node_id += 1
     return rows
@@ -117,6 +125,82 @@ def print_eval_scores(decoded_df, truth_df, fields, phase, step):
         print(f'{phase} step {step} mset {fs} eval scores   : [P: {p}, R: {r}, F: {f}]')
 
 
+def fix_extra_tokens_sent(sent_df):
+    sent_df['morph_id'] = list(range(1, len(sent_df) + 1))
+    token_id = np.array(sent_df['token_id'])
+    sent_df['token_id'] = np.cumsum(np.concatenate(([1], np.clip((token_id[1:] - token_id[:-1]), 0, 1))))
+
+    return sent_df
+
+
+def fix_extra_tokens_dfs(gold_df, pred_df):
+    gold_df = gold_df.set_index(['sent_id', 'token_id'])
+    pred_fix_df = pred_df.set_index(['sent_id', 'token_id'])
+
+    extra_tokens_index = gold_df.loc[(gold_df.tag == '_') & (gold_df.lemma == '_')].index
+
+    gold_fix_df = gold_df.loc[gold_df.index.difference(extra_tokens_index)]
+    pred_fix_df = pred_fix_df.loc[pred_fix_df.index.difference(extra_tokens_index)]
+
+    gold_fix_df = gold_fix_df.reset_index()
+    pred_fix_df = pred_fix_df.reset_index()
+
+    gold_fix_df = gold_fix_df.groupby('sent_id').apply(fix_extra_tokens_sent)
+    pred_fix_df = pred_fix_df.groupby('sent_id').apply(fix_extra_tokens_sent)
+
+    return gold_fix_df, pred_fix_df
+
+
+def filter_feats_str(feats_str: str, keep_feats: Set[str]):
+    feats_sep = '|'
+    feats = feats_str.split(feats_sep)
+    filtered_feats = [f for f in feats if f.split('=', maxsplit=1)[0] in keep_feats]
+
+    return feats_sep.join(filtered_feats)
+
+
+def filter_feats_df(df: pd.DataFrame, keep_feats: List[str]):
+    df.feats = df.feats.apply(filter_feats_str, args=(set(keep_feats),))
+
+
+def get_wandb_log_eval_scores(decoded_df, truth_df, fields, phase, step,
+                              fix_extra_tokens: bool = False, keep_feats: List[str] = None):
+    if fix_extra_tokens:
+        truth_df, decoded_df = fix_extra_tokens_dfs(truth_df, decoded_df)
+
+    # filter only relevant features (df.feats)
+    if keep_feats:
+        filter_feats_df(truth_df, keep_feats)
+        filter_feats_df(decoded_df, keep_feats)
+
+    aligned_scores, mset_scores = tb.morph_eval(pred_df=decoded_df, gold_df=truth_df, fields=fields)
+
+    metrics = {}
+    for fs in mset_scores:
+        aligned_score = aligned_scores[fs]
+        mset_score = mset_scores[fs]
+
+        fs_str = ', '.join(fs)
+
+        metrics[f'{fs_str}_aligned_p'] = aligned_score[0]
+        metrics[f'{fs_str}_aligned_r'] = aligned_score[1]
+        metrics[f'{fs_str}_aligned_f1'] = aligned_score[2]
+        metrics[f'{fs_str}_mset_p'] = mset_score[0]
+        metrics[f'{fs_str}_mset_r'] = mset_score[1]
+        metrics[f'{fs_str}_mset_f1'] = mset_score[2]
+
+    log_dict = {
+        'epoch': step,
+        'phase': phase,
+        **{
+            f'{phase}/{k}': v
+            for k, v in metrics.items()
+        }
+    }
+
+    return log_dict
+
+
 # 0	1	גנן	גנן	NN	NN	gen=M|num=S	1
 # 1	2	גידל	גידל	VB	VB	gen=M|num=S|per=3|tense=PAST	2
 # 2	3	דגן	דגן	NN	NN	gen=M|num=S	3
@@ -130,7 +214,8 @@ def save_lattice(df, out_file_path):
         for sid, group in gb:
             # for row in group[['from_node', 'to_node', 'form', 'lemma', 'tag', 'feats', 'token_id']].itertuples():
             for row in group.iterrows():
-                lattice_line = '\t'.join([str(v) for v in row[1][['from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'tag', 'feats', 'token_id']].tolist()])
+                lattice_line = '\t'.join([str(v) for v in row[1][
+                    ['from_node_id', 'to_node_id', 'form', 'lemma', 'tag', 'tag', 'feats', 'token_id']].tolist()])
                 f.write(f'{lattice_line}\n')
             f.write('\n')
 
@@ -138,7 +223,7 @@ def save_lattice(df, out_file_path):
 # Save bmes file used by the ner evaluation script
 def save_ner(df, out_file_path, ner_feat_name):
     gb = df.groupby('sent_id')
-    with open(out_file_path, 'w') as f:
+    with open(out_file_path, 'w', encoding='utf-8') as f:
         for sid, group in gb:
             for row in group[['form', 'feats']].itertuples():
                 if row.feats == '_':
@@ -174,3 +259,25 @@ def save_token_classification_finetune_ner_json(df, out_file_path):
             j = {'words': words, 'ner': ner}
             json.dump(j, f)
             f.write('\n')
+
+
+def get_most_free_device():
+    gpu = max(nvsmi.get_gpus(), key=lambda g: g.mem_free)
+
+    gpu_index = int(gpu.id)
+
+    return gpu_index, gpu
+
+
+def freeze_model(model: nn.Module):
+    for param in model.parameters():
+        param.requires_grad = False
+
+
+def unfreeze_model(model: nn.Module):
+    for param in model.parameters():
+        param.requires_grad = True
+
+
+def get_ud_preprocessed_dir_path(preprocessed_root_path: Path, lang: str, tb_name: str, bert_tokenizer_name: str):
+    return get_ud_treebank_dir_path(preprocessed_root_path, lang, tb_name) / bert_tokenizer_name

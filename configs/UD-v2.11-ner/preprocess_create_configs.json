@@ -1,0 +1,6 @@
+{
+    "template_config_path": "/home/nlp/egsotic/repo/alephbert/configs/UD-v2.11-ner/preprocess_template.json",
+    "placeholder_config_path": "/home/nlp/egsotic/repo/alephbert/configs/UD-v2.11-ner/preprocess_placeholders.json",
+    "out_dir_path": "/home/nlp/egsotic/repo/alephbert/configs/generated/UD-v2.11-ner",
+    "override_existing": true
+}

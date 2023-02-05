@@ -1,9 +1,9 @@
 import gzip
+import logging
 from pathlib import Path
+
 import fasttext
 import numpy as np
-import logging
-
 
 ft_models = {}
 ft_pad_vector = np.zeros(300, dtype=np.float)
@@ -46,9 +46,9 @@ def _load_vec_file(path: Path) -> (dict, list):
     vectors = []
     lines = _load_from(path)
     for i, line in enumerate(lines):
-        parts = line.split()
+        parts = line.rstrip().rsplit('\t', maxsplit=1)
         word = parts[0]
-        vector = [float(v) for v in parts[1:]]
+        vector = [float(v) for v in parts[1].split()]
         vectors.append(vector)
         word_indices[word] = i
     return word_indices, vectors
@@ -76,7 +76,8 @@ def save_word_vectors(vec_file_path: Path, word_vectors, word2index):
     index2word = {word2index[word]: word for word in word2index}
     with open(str(vec_file_path), 'w') as f:
         for ind, vec in enumerate(word_vectors):
-            word = index2word[ind+1]
-            line = ' '.join([word] + [str(v) for v in vec.tolist()])
+            word = index2word[ind + 1]
+            vec_str = ' '.join([str(v) for v in vec.tolist()])
+            line = word + '\t' + vec_str
             f.write(line)
             f.write('\n')

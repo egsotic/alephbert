@@ -1,10 +1,13 @@
+import itertools
+import logging
 from collections import Counter, defaultdict
 from pathlib import Path
+
 import pandas as pd
-import logging
-import itertools
-from bclm.format import conllx, conllu
-from bclm import ne_evaluate_mentions
+
+from . import ne_evaluate_mentions
+from .format import conllx, conllu
+from .format.conllu import get_ud_treebank_dir_path
 
 
 # gen=F|gen=M -> gen=FM, num=P|num=D -> num=DP
@@ -117,22 +120,23 @@ def spmrl(data_root_path, tb_name, tb_root_path=None, ma_name=None):
     return partition
 
 
-def ud(data_root_path, tb_name, tb_root_path=None, ma_name=None):
+def ud(output_data_root_path, tb_root_path=None, lang=None, tb_name=None, la_name=None, ma_name=None,
+       overwrite_existing=False):
     logging.info('UD lattices')
     partition = {'train': None, 'dev': None, 'test': None}
     ma_type = ma_name if ma_name is not None else 'gold'
-    data_tb_path = Path(data_root_path) / tb_name / ma_type
-    if tb_root_path is not None:
-        data_tb_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f'Loading treebank: {tb_root_path}')
-        partition = conllu.load_conllu(tb_root_path, partition, 'Hebrew', 'he', tb_name, ma_name)
+    output_data_tb_path = get_ud_treebank_dir_path(output_data_root_path, lang, tb_name) / ma_type
+    if tb_root_path is not None and (not output_data_tb_path.exists() or overwrite_existing):
+        output_data_tb_path.mkdir(parents=True, exist_ok=True)
+        logging.info(f'Loading treebank: {tb_root_path} {lang} {tb_name}')
+        partition = conllu.load_conllu(tb_root_path, partition, lang, la_name, tb_name, ma_name)
         for part in partition:
-            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            lattice_file_path = output_data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
             logging.info(f'Saving: {lattice_file_path}')
             partition[part].to_csv(lattice_file_path)
     else:
         for part in partition:
-            lattice_file_path = data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
+            lattice_file_path = output_data_tb_path / f'{part}_{tb_name}-{ma_type}.lattices.csv'
             logging.info(f'Loading: {lattice_file_path}')
             partition[part] = pd.read_csv(lattice_file_path, index_col=0)
     return partition
@@ -142,43 +146,57 @@ def get_subsets(s, n):
     return list(itertools.combinations(s, n))
 
 
+def all_fsets_gen(fields):
+    for n in range(1, len(fields) + 1):
+        fsets = get_subsets(fields, n)
+        for fs in fsets:
+            yield fs
+
+
 def morph_eval(pred_df, gold_df, fields):
+    return morph_eval_fsets(pred_df, gold_df, list(all_fsets_gen(fields)))
+
+
+def morph_eval_fsets(pred_df, gold_df, fsets):
     gold_gb = gold_df.groupby([gold_df.sent_id, gold_df.token_id])
     pred_gb = pred_df.groupby([pred_df.sent_id, pred_df.token_id])
-    aligned_gold_counts, aligned_pred_counts, aligned_intersection_counts = defaultdict(int), defaultdict(int), defaultdict(int)
+    aligned_gold_counts, aligned_pred_counts, aligned_intersection_counts = defaultdict(int), defaultdict(
+        int), defaultdict(int)
     mset_gold_counts, mset_pred_counts, mset_intersection_counts = defaultdict(int), defaultdict(int), defaultdict(int)
+
     for (sent_id, token_id), gold in sorted(gold_gb):
-        for n in range(1, len(fields) + 1):
-            fsets = get_subsets(fields, n)
-            for fs in fsets:
-                gold_values = [tuple(row[1].values) for row in gold[list(fs)].iterrows()]
-                if (sent_id, token_id) not in pred_gb.groups:
-                    pred_values = []
-                else:
-                    pred = pred_gb.get_group((sent_id, token_id))
-                    pred_values = [tuple(row[1].values) for row in pred[list(fs)].iterrows()]
-                # mset
-                gold_count, pred_count = Counter(gold_values), Counter(pred_values)
-                intersection_count = gold_count & pred_count
-                mset_gold_counts[fs] += sum(gold_count.values())
-                mset_pred_counts[fs] += sum(pred_count.values())
-                mset_intersection_counts[fs] += sum(intersection_count.values())
-                # aligned
-                intersection_values = [p for g, p in zip(gold_values, pred_values) if p == g]
-                aligned_gold_counts[fs] += len(gold_values)
-                aligned_pred_counts[fs] += len(pred_values)
-                aligned_intersection_counts[fs] += len(intersection_values)
+        for fs in fsets:
+            gold_values = [tuple(row[1].values) for row in gold[list(fs)].iterrows()]
+            if (sent_id, token_id) not in pred_gb.groups:
+                pred_values = []
+            else:
+                pred = pred_gb.get_group((sent_id, token_id))
+                pred_values = [tuple(row[1].values) for row in pred[list(fs)].iterrows()]
+            # mset
+            gold_count, pred_count = Counter(gold_values), Counter(pred_values)
+            intersection_count = gold_count & pred_count
+            mset_gold_counts[fs] += sum(gold_count.values())
+            mset_pred_counts[fs] += sum(pred_count.values())
+            mset_intersection_counts[fs] += sum(intersection_count.values())
+            # aligned
+            intersection_values = [p for g, p in zip(gold_values, pred_values) if p == g]
+            aligned_gold_counts[fs] += len(gold_values)
+            aligned_pred_counts[fs] += len(pred_values)
+            aligned_intersection_counts[fs] += len(intersection_values)
     aligned_scores, mset_scores = {}, {}
+
     for fs in aligned_gold_counts:
         precision = aligned_intersection_counts[fs] / aligned_pred_counts[fs] if aligned_pred_counts[fs] else 0.0
         recall = aligned_intersection_counts[fs] / aligned_gold_counts[fs] if aligned_gold_counts[fs] else 0.0
         f1 = 2.0 * (precision * recall) / (precision + recall) if precision + recall else 0.0
         aligned_scores[fs] = precision, recall, f1
+
     for fs in mset_gold_counts:
         precision = mset_intersection_counts[fs] / mset_pred_counts[fs] if mset_pred_counts[fs] else 0.0
         recall = mset_intersection_counts[fs] / mset_gold_counts[fs] if mset_gold_counts[fs] else 0.0
         f1 = 2.0 * (precision * recall) / (precision + recall) if precision + recall else 0.0
         mset_scores[fs] = precision, recall, f1
+
     return aligned_scores, mset_scores
 
 

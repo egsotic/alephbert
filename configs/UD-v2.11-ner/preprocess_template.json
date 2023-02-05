@@ -1,0 +1,16 @@
+{
+    "name": "preprocess_{model__0}_{lang-tb_name-la-ft__0}_{lang-tb_name-la-ft__1}.json",
+    "template": {
+        "bert_tokenizer_name": "{model__0}",
+        "bert_tokenizer_path": "{model__1}",
+        "lang": "{lang-tb_name-la-ft__0}",
+        "tb_name": "{lang-tb_name-la-ft__1}",
+        "la_name": "{lang-tb_name-la-ft__2}",
+        "fasttext_lang": "{lang-tb_name-la-ft__3}",
+        "fasttext_model_path": "/home/nlp/egsotic/repo/facebookresearch/fastText/models/cc.{lang-tb_name-la-ft__3}.300.bin",
+        "tb_root_path": "/home/nlp/egsotic/data/ud-treebanks-v2.11",
+        "raw_root_path": "/home/nlp/egsotic/repo/alephbert/data/raw/UD-v2.11",
+        "preprocessed_root_path": "/home/nlp/egsotic/repo/alephbert/data/preprocessed/UD-v2.11",
+        "overwrite_existing": false
+    }
+}

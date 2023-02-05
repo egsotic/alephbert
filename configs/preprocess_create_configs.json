@@ -1,0 +1,6 @@
+{
+    "template_config_path": "/home/nlp/egsotic/repo/alephbert/configs/preprocess_template.json",
+    "placeholder_config_path": "/home/nlp/egsotic/repo/alephbert/configs/preprocess_placeholders.json",
+    "out_dir_path": "/home/nlp/egsotic/repo/alephbert/configs/generated",
+    "override_existing": false
+}

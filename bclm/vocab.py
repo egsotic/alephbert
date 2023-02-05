@@ -1,5 +1,5 @@
 from collections import defaultdict
-from bclm import treebank as tb
+from . import treebank as tb
 from pathlib import Path
 import pickle
 

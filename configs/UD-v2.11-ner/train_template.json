@@ -1,0 +1,31 @@
+{
+    "name": "train_{model__0}_{lang-tb_name-la-labels__0}_{lang-tb_name-la-labels__1}.json",
+    "template": {
+        "tb_schema": "UD",
+        "lang": "{lang-tb_name-la-labels__0}",
+        "tb_name": "{lang-tb_name-la-labels__1}",
+        "la_name": "{lang-tb_name-la-labels__2}",
+        "raw_root_path": "/home/nlp/egsotic/repo/alephbert/data/raw/UD-v2.11",
+        "preprocessed_root_path": "/home/nlp/egsotic/repo/alephbert/data/preprocessed/UD-v2.11",
+        "out_root_path": "/home/nlp/egsotic/repo/alephbert/experiments/UD-v2.11",
+        "bert_tokenizer_name": "{model__0}",
+        "bert_tokenizer_path": "{model__1}",
+        "bert_model_name": "{model__0}",
+        "bert_model_path": "{model__1}",
+        "md_strategry": "morph-sequence",
+        "label_names@value": "lang-tb_name-la-labels__3",
+        "device": 0,
+        "do_train": true,
+        "predict_train": true,
+        "do_eval": true,
+        "do_test": true,
+        "epochs": 15,
+        "epochs_frozen": 6,
+        "eval_epochs": 1,
+        "lr_scheduler_cls_name": "StepLR",
+        "lr_scheduler_params": {
+            "step_size": 2,
+            "gamma": 0.35
+        }
+    }
+}

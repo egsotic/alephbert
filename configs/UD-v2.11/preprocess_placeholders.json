@@ -1,0 +1,42 @@
+{
+    "model": [
+        [
+            "AlephBERT",
+            "onlplab/alephbert-base"
+        ],
+        [
+            "mBERT",
+            "bert-base-multilingual-cased"
+        ],
+        [
+            "heBERT",
+            "avichr/heBERT"
+        ],
+        [
+            "AlephBERTGimel",
+            "/home/nlp/egsotic/data/AlephBERTGimel"
+        ],
+        [
+            "AlephBERTGimel_2.0",
+            "/home/nlp/egsotic/data/AlephBERTGimel_2.0"
+        ],
+        [
+            "XLM",
+            "xlm-roberta-base"
+        ]
+    ],
+    "lang-tb_name-la-ft": [
+        [
+            "Hebrew",
+            "HTB_nemo",
+            "he",
+            "he"
+        ],
+        [
+            "Hebrew",
+            "IAHLTwiki",
+            "he",
+            "he"
+        ]
+    ]
+}
