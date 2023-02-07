@@ -9,6 +9,7 @@ import nvsmi
 import pandas as pd
 import torch
 from torch import nn as nn
+from transformers import AutoTokenizer, AutoModel
 
 from bclm import treebank as tb
 from bclm.format.conllu import get_ud_treebank_dir_path
@@ -281,3 +282,25 @@ def unfreeze_model(model: nn.Module):
 
 def get_ud_preprocessed_dir_path(preprocessed_root_path: Path, lang: str, tb_name: str, bert_tokenizer_name: str):
     return get_ud_treebank_dir_path(preprocessed_root_path, lang, tb_name) / bert_tokenizer_name
+
+
+def get_tokenizer(tokenizer_type: str, bert_tokenizer_path: str):
+    if tokenizer_type == 'auto':
+        return AutoTokenizer.from_pretrained(bert_tokenizer_path)
+    elif tokenizer_type == 'dicta':
+        from custom_models.dictabert import DictaAutoTokenizer
+
+        return DictaAutoTokenizer.from_pretrained(bert_tokenizer_path)
+
+    raise Exception(f'unknown tokenizer type {tokenizer_type}')
+
+
+def get_model(model_type: str, bert_model_path: str):
+    if model_type == 'auto':
+        return AutoModel.from_pretrained(bert_model_path)
+    elif model_type == 'dicta':
+        from custom_models.dictabert import DictaAutoBert
+
+        return DictaAutoBert(AutoModel, bert_model_path)
+
+    raise Exception(f'unknown model type {model_type}')
