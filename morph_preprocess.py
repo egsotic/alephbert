@@ -5,8 +5,7 @@ from bclm import treebank as tb
 from constants import PAD, SOS, EOS, SEP
 from data.preprocess_form import *
 from data.preprocess_labels import *
-from utils import get_ud_preprocessed_dir_path
-from bclm.format.conllu import get_ud_treebank_dir_path
+from utils import get_ud_preprocessed_dir_path, get_tokenizer
 
 
 def main(config):
@@ -21,6 +20,7 @@ def main(config):
     bert_tokenizer_name = config['bert_tokenizer_name']
     bert_tokenizer_path = config['bert_tokenizer_path']
     oracle_tokenizer = config.get('oracle_tokenizer', False)
+    tokenizer_type = config.get('tokenizer_type', 'auto')
 
     if oracle_tokenizer:
         bert_tokenizer_name = f'oracle_{bert_tokenizer_name}'
@@ -59,7 +59,7 @@ def main(config):
                           overwrite_existing=overwrite_existing)
 
     # tokenizer
-    bert_tokenizer = AutoTokenizer.from_pretrained(bert_tokenizer_path)
+    bert_tokenizer = get_tokenizer(tokenizer_type, bert_tokenizer_path)
 
     # oracle
     if oracle_tokenizer:

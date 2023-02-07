@@ -43,8 +43,10 @@ def main(config):
     # bert
     bert_tokenizer_name = config['bert_tokenizer_name']
     bert_tokenizer_path = config['bert_tokenizer_path']
+    tokenizer_type = config.get('tokenizer_type', 'auto')
     bert_model_name = config['bert_model_name']
     bert_model_path = config['bert_model_path']
+    model_type = config.get('model_type', 'auto')
 
     # # bert params
     # bert_vocab_size = config['bert_vocab_size']
@@ -140,8 +142,8 @@ def main(config):
     test_dataloader = DataLoader(datasets['test'], batch_size=100)
 
     # Language Model
-    tokenizer = AutoTokenizer.from_pretrained(bert_tokenizer_path)
-    bert = AutoModel.from_pretrained(bert_model_path)
+    tokenizer = utils.get_tokenizer(tokenizer_type, bert_tokenizer_path)
+    bert = utils.get_model(model_type, bert_model_path)
 
     # Vocabs
     char_vectors, char_vocab = preprocess_labels.load_char_vocab(preprocessed_dir_path)
