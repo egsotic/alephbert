@@ -1,5 +1,6 @@
 import argparse
 import json
+import shutil
 
 from bclm import treebank as tb
 from constants import PAD, SOS, EOS, SEP
@@ -48,6 +49,8 @@ def main(config):
     fasttext_model_path = Path(config['fasttext_model_path'])
     overwrite_existing = config.get('overwrite_existing', False)
 
+    checkpoint_preprocessed_dir_path = config.get('checkpoint_preprocessed_dir_path', None)
+
     preprocessed_dir_path = get_ud_preprocessed_dir_path(preprocessed_root_path, lang, tb_name, bert_tokenizer_name)
     preprocessed_dir_path.mkdir(parents=True, exist_ok=overwrite_existing)
 
@@ -70,10 +73,16 @@ def main(config):
     token_char_data = get_token_char_data(preprocessed_dir_path, morph_data)
     xtoken_df = get_xtoken_data(preprocessed_dir_path, morph_data, bert_tokenizer, sos=SOS, eos=EOS)
 
-    save_char_vocab(preprocessed_dir_path, fasttext_lang, fasttext_model_path, raw_partition,
-                    pad=PAD, sep=SEP, sos=SOS, eos=EOS)
-    char_vectors, char_vocab = load_char_vocab(preprocessed_dir_path)
-    label_vocab = load_label_vocab(preprocessed_dir_path, morph_data, pad=PAD)
+    if checkpoint_preprocessed_dir_path:
+        shutil.copy(checkpoint_preprocessed_dir_path / 'ft_char.vec.txt',
+                    preprocessed_dir_path / 'ft_char.vec.txt')
+        char_vectors, char_vocab = load_char_vocab(checkpoint_preprocessed_dir_path)
+        label_vocab = load_label_vocab(checkpoint_preprocessed_dir_path, ['train', 'test', 'dev'], pad=PAD)
+    else:
+        save_char_vocab(preprocessed_dir_path, fasttext_lang, fasttext_model_path, raw_partition,
+                        pad=PAD, sep=SEP, sos=SOS, eos=EOS)
+        char_vectors, char_vocab = load_char_vocab(preprocessed_dir_path)
+        label_vocab = load_label_vocab(preprocessed_dir_path, morph_data, pad=PAD)
 
     save_xtoken_data_samples(preprocessed_dir_path, xtoken_df, bert_tokenizer, pad=PAD)
     save_token_char_data_samples(preprocessed_dir_path, token_char_data, char_vocab['char2id'], pad=PAD)
