@@ -2,17 +2,18 @@ import json
 from collections import Counter
 from itertools import zip_longest
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Union, Type
 
 import numpy as np
 import nvsmi
 import pandas as pd
 import torch
 from torch import nn as nn
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer, AutoModel, PreTrainedModel
 
 from bclm import treebank as tb
 from bclm.format.conllu import get_ud_treebank_dir_path
+from custom_models import academic_budget_bert
 
 
 def to_sent_tokens(token_chars, id2char: dict) -> list:
@@ -295,12 +296,22 @@ def get_tokenizer(tokenizer_type: str, bert_tokenizer_path: str):
     raise Exception(f'unknown tokenizer type {tokenizer_type}')
 
 
-def get_model(model_type: str, bert_model_path: str):
+def get_model(model_type: str, bert_model_path: str, model_cls: Union[Type[PreTrainedModel], str] = None, **kwargs):
     if model_type == 'auto':
-        return AutoModel.from_pretrained(bert_model_path)
-    elif model_type == 'dicta':
-        from custom_models.dictabert import DictaAutoBert
+        if model_cls is None or model_cls == 'auto':
+            model_cls = AutoModel
+        return model_cls.from_pretrained(bert_model_path, **kwargs)
 
-        return DictaAutoBert(AutoModel, bert_model_path)
+    elif model_type == 'dicta':
+        if model_cls is None or model_cls == 'auto':
+            from tasks.custom_models.dictabert import DictaAutoBert
+            model_cls = DictaAutoBert
+
+        return model_cls(AutoModel, bert_model_path, **kwargs)
+
+    elif model_type == 'academic_budget_bert':
+        if model_cls is None or model_cls == 'auto':
+            model_cls = 'BertModelWrapper'
+        return academic_budget_bert.get_model(bert_model_path, model_cls, **kwargs)
 
     raise Exception(f'unknown model type {model_type}')
