@@ -13,7 +13,6 @@ from transformers import AutoTokenizer, AutoModel, PreTrainedModel
 
 from bclm import treebank as tb
 from bclm.format.conllu import get_ud_treebank_dir_path
-from custom_models import academic_budget_bert
 
 
 def to_sent_tokens(token_chars, id2char: dict) -> list:
@@ -304,12 +303,13 @@ def get_model(model_type: str, bert_model_path: str, model_cls: Union[Type[PreTr
 
     elif model_type == 'dicta':
         if model_cls is None or model_cls == 'auto':
-            from tasks.custom_models.dictabert import DictaAutoBert
+            from custom_models.dictabert import DictaAutoBert
             model_cls = DictaAutoBert
 
         return model_cls(AutoModel, bert_model_path, **kwargs)
 
     elif model_type == 'academic_budget_bert':
+        from custom_models import academic_budget_bert
         if model_cls is None or model_cls == 'auto':
             model_cls = 'BertModelWrapper'
         return academic_budget_bert.get_model(bert_model_path, model_cls, **kwargs)
