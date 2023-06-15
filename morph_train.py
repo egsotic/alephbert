@@ -1,6 +1,8 @@
 import argparse
+import glob
 import json
 import logging
+import os
 import random
 from pathlib import Path
 from typing import List, Dict
@@ -75,7 +77,7 @@ def main(config):
     epochs = config['epochs']
     epochs_frozen = config['epochs_frozen']
     eval_epochs = config['eval_epochs']
-    model_checkpoint_path = config.get('model_checkpoint_path', None)
+    model_checkpoint_path = config.get('model_checkpoint_path', 'auto')
     checkpoint_epochs = config.get('checkpoint_epochs', 0)
     lr = config.get('lr', 1e-3)
     lr_scheduler_cls_name = config['lr_scheduler_cls_name']
@@ -189,11 +191,26 @@ def main(config):
 
     # load from checkpoint
     if model_checkpoint_path:
-        print(f'loading model from checkpoint {model_checkpoint_path}')
+        should_load_checkpoint = True
+        if model_checkpoint_path == 'auto':
+            checkpoints = glob.glob(os.path.join(out_dir_path, '*/md_model.pt'))
+            if len(checkpoints) > 0:
+                # latest
+                latest_checkpoint_epoch = max(int(os.path.basename(os.path.dirname(p)))
+                                              for p in checkpoints)
 
-        with open(model_checkpoint_path, 'rb') as f:
-            state_dict = torch.load(f)
-        md_model.load_state_dict(state_dict)
+                model_checkpoint_path = out_dir_path / str(latest_checkpoint_epoch) / 'md_model.pt'
+                checkpoint_epochs = latest_checkpoint_epoch
+                print('loading latest checkpoint', model_checkpoint_path)
+            else:
+                should_load_checkpoint = False
+        else:
+            print(f'loading model from checkpoint {model_checkpoint_path}')
+
+        if should_load_checkpoint:
+            with open(model_checkpoint_path, 'rb') as f:
+                state_dict = torch.load(f)
+            md_model.load_state_dict(state_dict)
 
     # device
     if device == 'auto':
